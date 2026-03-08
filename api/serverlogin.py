@@ -3,7 +3,8 @@ import uvicorn
 import sys, os
 
 # 프로젝트 루트(상위 폴더)를 sys.path에 추가하여 모듈 인식 가능하게 함
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
 
 from fastapi import FastAPI, Form, Request, HTTPException, status
 from fastapi.responses import RedirectResponse
@@ -13,7 +14,10 @@ from datetime import datetime, timedelta
 from api.mainai import router as ai_router
 
 app = FastAPI(title="Dabom ERP AI System")
-templates = Jinja2Templates(directory="templates")
+
+# templates 폴더 절대 경로 설정
+templates_dir = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=templates_dir)
 SECRET_KEY = "dabom_super_secret_key_for_jwt"
 ALGORITHM = "HS256"
 
