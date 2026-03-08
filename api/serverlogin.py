@@ -1,0 +1,48 @@
+# serverlogin.py
+import uvicorn
+from fastapi import FastAPI, Form, Request, HTTPException, status
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+import jwt
+from datetime import datetime, timedelta
+from mainai import router as ai_router
+
+app = FastAPI(title="Dabom ERP AI System")
+templates = Jinja2Templates(directory="templates")
+SECRET_KEY = "dabom_super_secret_key_for_jwt"
+ALGORITHM = "HS256"
+
+mock_db_t_cuserinfo = {"user01": {"userid": "user01", "comcd": "1091264100", "username": "홍길동"}}
+
+@app.get("/")
+@app.get("/login")
+async def show_login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/api/login")
+async def login_process(userid: str = Form(...), password: str = Form("")):
+    user_info = mock_db_t_cuserinfo.get(userid)
+    if not user_info: return RedirectResponse(url="/login", status_code=303)
+    payload = {"userid": userid, "comcd": user_info["comcd"], "username": user_info["username"], "exp": datetime.utcnow() + timedelta(minutes=60)}
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    response = RedirectResponse(url=f"/{user_info['comcd']}/dashboard", status_code=303)
+    response.set_cookie(key="dabom_session", value=token, httponly=True)
+    return response
+
+@app.get("/{comcd}/dashboard")
+async def show_dashboard(request: Request, comcd: str):
+    token = request.cookies.get("dabom_session")
+    if not token: return RedirectResponse(url="/login")
+    try:
+        decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return templates.TemplateResponse("dashboard.html", {"request": request, "user_info": decoded})
+    except: return RedirectResponse(url="/login")
+
+@app.get("/aipost.html")
+async def show_aipost(request: Request):
+    return templates.TemplateResponse("aipost.html", {"request": request})
+
+app.include_router(ai_router)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 전표 입력 시스템 v4.9</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Pretendard', sans-serif; background-color: #f1f5f9; }
+        .selected-row { background-color: #e0e7ff !important; outline: 2px solid #6366f1; }
+        .cell-input { width: 100%; outline: none; padding: 4px; border-bottom: 1px solid transparent; background: transparent; }
+        .cell-input:focus { border-bottom-color: #6366f1; background: white; }
+        .disabled-input { background-color: #f8fafc !important; cursor: not-allowed !important; color: #94a3b8 !important; pointer-events: none; }
+        .modified-highlight { background-color: #fff1f2 !important; border: 2px solid #f43f5e !important; }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-[1600px] mx-auto bg-white shadow-2xl rounded-2xl overflow-hidden border">
+        
+        <div class="px-6 py-3 border-b bg-slate-50 flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <span class="bg-amber-100 text-amber-700 px-3 py-1 rounded-md text-xs font-bold"><i class="fa-solid fa-lightbulb"></i> 상황별 예제</span>
+                <select id="example-select" class="border p-1.5 rounded text-xs w-40" onchange="onExampleChange()">
+                    <option value="">예제를 선택하세요</option>
+                    <option value="sales">매출발생(CI)</option>
+                    <option value="purchase">상품구매(SI)</option>
+                    <option value="expense">비용지출(GL)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="p-6 border-b bg-white">
+            <div class="flex gap-4">
+                <textarea id="ai-input" class="flex-1 border p-4 rounded-xl text-sm h-28 focus:ring-2 focus:ring-indigo-500" placeholder="거래 내용을 입력하세요..."></textarea>
+                <div class="flex flex-col gap-2 w-56">
+                    <div class="flex gap-2">
+                        <button id="btn-ai-parse" onclick="onAiParse()" class="flex-1 bg-indigo-600 text-white p-3 rounded-lg font-bold hover:bg-indigo-700 transition-all text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> <span id="ai-text">AI 분개</span>
+                        </button>
+                        <button onclick="location.reload()" class="bg-white border border-slate-200 text-slate-600 px-4 rounded-lg font-bold hover:bg-slate-50 text-sm cursor-pointer">취소</button>
+                    </div>
+                    <button onclick="onPostJournal()" class="bg-slate-800 text-white p-4 rounded-lg font-bold hover:bg-slate-900 shadow-lg active:scale-95 transition-all cursor-pointer"><i class="fa-solid fa-save mr-1"></i> 전표 생성 (Posting)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-6 border-b bg-white">
+            <h3 class="font-bold text-indigo-800 text-sm mb-4 border-l-4 border-indigo-600 pl-2">전표 헤더 (Header Info)</h3>
+            <div class="grid grid-cols-5 gap-6 text-[11px]">
+                
+                <div class="col-span-2">
+                    <label class="font-bold text-slate-500 mb-1 block">거래처코드 / 명</label>
+                    <div class="flex border rounded-lg overflow-hidden" id="bizpt-container">
+                        <input type="text" id="h-bizptcd" class="w-1/3 p-2 font-mono bg-slate-50" readonly>
+                        <button onclick="openSearch('bizpt')" class="px-3 border-x bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        <input type="text" id="h-bizname" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">전표유형 / 전기일자</label>
+                    <div class="flex gap-1">
+                        <select id="h-doctyp" class="w-1/3 border p-2 rounded-lg cursor-pointer"><option value="CI">CI(매출)</option><option value="SI">SI(매입)</option><option value="GL">GL(일반)</option></select>
+                        <input type="date" id="h-pstdate" class="w-2/3 border p-2 rounded-lg cursor-pointer" onchange="syncDates()">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">통화 / 환율</label>
+                    <div class="flex border rounded-lg overflow-hidden">
+                        <input type="text" id="h-currency" value="KRW" class="w-1/3 p-2 text-center border-r font-bold">
+                        <input type="number" id="h-exrate" value="1" class="w-2/3 p-2 text-right" onchange="calculateAll()">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">분개수정 (사유)</label>
+                    <select id="h-modify" class="w-full border p-2 rounded-lg cursor-pointer"><option value="">선택하세요</option><option value="POLICY">내부 규정</option><option value="ETC">기타</option></select>
+                </div>
+                
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">세금코드</label>
+                    <div class="flex border rounded-lg overflow-hidden" id="taxinfo-container">
+                        <input type="text" id="h-taxinfo" class="w-full p-2" readonly placeholder="필수 검색">
+                        <button onclick="openSearch('taxkey')" class="px-3 border-l bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                    </div>
+                </div>
+                
+                <div><label class="font-bold text-slate-500 mb-1 block">(세금)계산서 발행일</label><input type="date" id="h-taxdate" class="w-full border p-2 rounded-lg cursor-pointer"></div>
+                
+                <div><label class="font-bold text-slate-500 mb-1 block">멀티키(Mulky)</label><select id="h-mulky" class="w-full border p-2 rounded-lg bg-orange-50 text-orange-700 cursor-pointer"><option value=" "> </option><option value="A">A(선수/선급)</option></select></div>
+                
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">손익부서</label>
+                    <div class="flex border rounded-lg overflow-hidden" id="pctr-container">
+                        <input type="text" id="h-pctrcd" class="w-1/3 p-2 font-mono bg-slate-50" readonly oninput="syncPctrToLines()">
+                        <button onclick="openSearch('pctr')" class="px-3 border-x bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        <input type="text" id="h-pctrnm" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-bold text-slate-500 mb-1 block">관리항목(manaky)</label>
+                    <div class="flex border rounded-lg overflow-hidden" id="anakey-container">
+                        <input type="text" id="h-anakey" class="w-1/3 p-2 font-mono bg-slate-50" readonly>
+                        <button onclick="openSearch('anakey')" class="px-3 border-x bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        <input type="text" id="h-ananm" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
+                    </div>
+                </div>
+
+                <div class="col-span-2 flex gap-4">
+                    <div class="w-1/2">
+                        <label class="font-bold text-slate-500 mb-1 block">증빙일자</label>
+                        <input type="date" id="h-docdate" class="w-full border p-2 rounded-lg cursor-pointer">
+                    </div>
+                    <div class="w-1/2">
+                        <label class="font-bold text-slate-500 mb-1 block">환산일자</label>
+                        <input type="date" id="h-transdt" class="w-full border p-2 rounded-lg cursor-pointer text-indigo-700 bg-indigo-50">
+                    </div>
+                </div>
+                <div class="col-span-3"><label class="font-bold text-slate-500 mb-1 block">적요</label><input type="text" id="h-text" class="w-full border p-2 rounded-lg" placeholder="전표 전체 적요를 입력하세요."></div>
+            </div>
+        </div>
+
+        <div class="p-6 bg-slate-50/50">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-indigo-800 text-sm border-l-4 border-indigo-600 pl-2">분개 상세 내역 (Line Items)</h3>
+                <div class="flex gap-2">
+                    <button onclick="addNewLine()" class="bg-indigo-50 text-indigo-600 px-4 py-1 rounded-full border border-indigo-200 text-[11px] font-bold hover:bg-indigo-100 cursor-pointer">+ 라인추가</button>
+                    <button onclick="deleteSelected()" class="bg-rose-50 text-rose-600 px-4 py-1 rounded-full border border-rose-200 text-[11px] font-bold hover:bg-rose-100 cursor-pointer">- 라인삭제</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm bg-white max-h-[400px]">
+                <table class="w-full text-[11px] text-left whitespace-nowrap">
+                    <thead class="bg-slate-100 sticky top-0 font-bold border-b text-slate-600">
+                        <tr><th class="p-3 w-12 text-center">No</th><th class="p-3 w-20">구분</th><th class="p-3 w-40">계정코드</th><th class="p-3 w-40">계정명</th><th class="p-3 text-right w-36">거래통화금액</th><th class="p-3 text-right w-36">로컬금액(KRW)</th><th class="p-3 w-28">부서</th><th class="p-3 w-28">항목</th><th class="p-3 w-28">만기일</th><th class="p-3">적요</th></tr>
+                    </thead>
+                    <tbody id="journal-tbody" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+            <div class="mt-4 p-4 bg-slate-900 text-white rounded-xl flex justify-end gap-12 font-bold text-xs" id="sum-area">
+                <div id="sum-debit">차변합: <span class="text-blue-400 ml-1">0</span></div>
+                <div id="sum-credit">대변합: <span class="text-rose-400 ml-1">0</span></div>
+                <div id="sum-diff">차이: 0</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="search-modal" class="fixed inset-0 bg-slate-900/60 hidden z-50 flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white w-[500px] rounded-2xl shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-100 border-b flex justify-between items-center font-bold">
+                <span>마스터 데이터 검색</span>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 text-lg cursor-pointer">✕</button>
+            </div>
+            <div class="p-4 flex gap-2 bg-white">
+                <input type="text" id="modal-query" class="flex-1 border p-3 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="검색어 입력..." onkeydown="if(event.key==='Enter') executeSearch()">
+                <button onclick="executeSearch()" class="bg-indigo-600 text-white px-5 rounded-lg text-sm font-bold hover:bg-indigo-700 cursor-pointer">검색</button>
+            </div>
+            <div id="modal-results" class="max-h-[350px] overflow-y-auto p-2 bg-slate-50"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "/api";
+        let isManualEdit = false, selectedRow = null, currentSearchType = "", activeLineBtn = null, currentPatternId = null; 
+
+        function onExampleChange() {
+            const val = document.getElementById('example-select').value;
+            const examples = {
+                'sales': "2026.03.15 엘지전자에 긴다리의자 매출발생하여 2,200,000원 부가세 10% 발생하고 입금일은 26.4.10일, 세금계산서 발행일 26.3.31일날 처리해줘",
+                'purchase': "2026.03.15 삼성전자에 낮은의자 상품구매 2,200,000원 부가세 10%로 출금일은 26.3.25일 발생",
+                'expense': "오늘 구매1팀 회식으로 220,000원 지불 완료했어."
+            };
+            document.getElementById('ai-input').value = examples[val] || "";
+        }
+
+        async function onAiParse() {
+            const text = document.getElementById('ai-input').value;
+            if(!text) return alert("내용을 입력하세요.");
+            
+            document.getElementById('btn-ai-parse').disabled = true;
+            document.getElementById('ai-text').innerText = "분석 중...";
+            
+            try {
+                let res = await fetch(`${API_BASE}/ai-parse`, { 
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ user_id: "USER01", natural_text: text }) 
+                });
+                if(res.status === 401) { window.top.location.href = '/login'; return; }
+                const data = await res.json();
+                if(res.ok && data.status === 'success') {
+                    currentPatternId = data.pattern_id || null; 
+                    fillHeader(data.parsed_entities);
+                    renderLines(data.recommended_pattern, data.parsed_entities.total_amount, data.parsed_entities.due_date);
+                    document.getElementById('ai-text').innerText = "분석 완료";
+                } else { 
+                    alert("분석 실패: " + (data.message || "서버 오류")); 
+                    resetAiBtn(); 
+                }
+            } catch (err) { 
+                alert("서버 연결 실패."); 
+                resetAiBtn(); 
+            } finally {
+                document.getElementById('btn-ai-parse').disabled = false;
+                document.getElementById('ai-text').innerText = "AI 분개";
+            }
+        }
+
+        function resetAiBtn() { 
+            document.getElementById('btn-ai-parse').disabled = false; 
+            document.getElementById('ai-text').innerText = "AI 분개"; 
+        }
+
+        function syncDates() {
+            const pst = document.getElementById('h-pstdate').value;
+            if(pst) document.getElementById('h-transdt').value = pst;
+        }
+
+        function renderLines(p, t, dueDate) {
+            const b = document.getElementById('journal-tbody'); b.innerHTML = '';
+            const lines = p || [];
+            const total = parseFloat(t) || 0;
+            const doctyp = document.getElementById('h-doctyp').value;
+            
+            const hasTaxLine = lines.some(l => l.type === 'TAX');
+            let s = total, v = 0;
+            if (hasTaxLine) { s = Math.round(total / 1.1); v = total - s; }
+
+            const currentPctr = document.getElementById('h-pctrcd').value;
+            const currentAna = document.getElementById('h-anakey').value;
+
+            lines.forEach((l) => {
+                let amt = total;
+                if (l.type === 'TAX') amt = v;
+                else if (l.type === 'REV' || (doctyp === 'SI' && l.type === 'EXP')) amt = s;
+                else if (l.type === 'EXP') amt = (hasTaxLine ? s : total);
+                
+                l._calcAmt = amt; 
+                if(!l.pctrcd) l.pctrcd = currentPctr;
+                if(!l.anakey) l.anakey = currentAna;
+            });
+
+            lines.sort((a, b) => {
+                if (b._calcAmt !== a._calcAmt) return b._calcAmt - a._calcAmt; 
+                const glA = a.glmaster || "999999";
+                const glB = b.glmaster || "999999";
+                return glA.localeCompare(glB);
+            });
+
+            lines.forEach((l, i) => { b.appendChild(createRow(i+1, l, l._calcAmt, dueDate)); });
+            calculateAll();
+        }
+
+        function createRow(no, line={}, amt=0, dueDate='') {
+            const tr = document.createElement('tr');
+            if (line.type) tr.dataset.aiType = line.type;
+            if (line.type === 'TAX') tr.dataset.isTax = "Y";
+
+            const isDue = (line.gltype === 'C' || line.gltype === 'S');
+            const dueClass = isDue ? '' : 'disabled-input';
+            const dueDisabled = isDue ? '' : 'disabled';
+            const finalDueDate = isDue ? (line.duedt || dueDate || '') : '';
+            
+            const glBoxClass = line.glname ? 'bg-white' : 'bg-red-50 border-red-500 ring-1 ring-red-500';
+            
+            tr.innerHTML = `
+                <td class="p-3 text-center text-slate-400 font-mono cursor-pointer">${no}</td>
+                <td class="p-2"><select class="side-select cell-input cursor-pointer" onchange="markEdit(); calculateAll()"><option value="D" ${line.debcre==='D'?'selected':''}>차변</option><option value="C" ${line.debcre==='C'?'selected':''}>대변</option></select></td>
+                <td class="p-2">
+                    <div class="flex border rounded overflow-hidden ${glBoxClass} gl-container">
+                        <input type="text" class="cell-input font-mono line-gl w-full border-none" value="${line.glmaster||''}" readonly>
+                        <button onclick="openSearch('glmaster', this)" class="bg-slate-50 px-2 border-l text-slate-500 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                    </div>
+                </td>
+                <td class="p-2"><input type="text" class="cell-input line-glname text-slate-500" value="${line.glname||''}" readonly placeholder="계정 검색 필요"></td>
+                <td class="p-2"><input type="text" class="cell-input text-right amt-input font-bold" value="${amt.toLocaleString()}" onkeyup="this.value=Number(this.value.replace(/\\D/g,'')).toLocaleString(); calculateAll();"></td>
+                <td class="p-3 text-right font-bold loc-amt-display text-slate-500">0</td>
+                <td class="p-2"><input type="text" class="cell-input line-pctr" value="${line.pctrcd||''}" oninput="markEdit()"></td>
+                <td class="p-2"><input type="text" class="cell-input line-anakey" value="${line.anakey||''}" oninput="markEdit()"></td>
+                <td class="p-2"><input type="date" class="cell-input line-duedt ${dueClass} cursor-pointer" value="${finalDueDate}" ${dueDisabled} onchange="markEdit()"></td>
+                <td class="p-2"><input type="text" class="cell-input line-text" value="${line.text||''}" oninput="markEdit()"></td>
+            `;
+            tr.onclick = () => { if(selectedRow) selectedRow.classList.remove('selected-row'); selectedRow = tr; tr.classList.add('selected-row'); };
+            return tr;
+        }
+
+        function addNewLine() { 
+            const b = document.getElementById('journal-tbody');
+            b.appendChild(createRow(b.children.length+1, { pctrcd: document.getElementById('h-pctrcd').value, anakey: document.getElementById('h-anakey').value })); 
+            calculateAll(); markEdit();
+        }
+
+        function deleteSelected() { if(selectedRow) selectedRow.remove(); calculateAll(); markEdit(); }
+        function markEdit() { isManualEdit = true; document.getElementById('h-modify').classList.add('modified-highlight'); }
+
+        function calculateAll() {
+            let dSum=0, cSum=0; const ex = parseFloat(document.getElementById('h-exrate').value) || 1;
+            document.querySelectorAll('#journal-tbody tr').forEach(tr => {
+                const bAmt = parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0;
+                tr.querySelector('.loc-amt-display').textContent = Math.round(bAmt * ex).toLocaleString();
+                if(tr.querySelector('.side-select').value === 'D') dSum += bAmt; else cSum += bAmt;
+            });
+            document.getElementById('sum-debit').innerHTML = `차변합: <span class="text-blue-400 ml-1">${dSum.toLocaleString()}</span>`;
+            document.getElementById('sum-credit').innerHTML = `대변합: <span class="text-rose-400 ml-1">${cSum.toLocaleString()}</span>`;
+            const diff = dSum - cSum;
+            document.getElementById('sum-diff').textContent = `차이: ${diff.toLocaleString()}`;
+            document.getElementById('sum-diff').className = diff === 0 ? "text-green-400" : "text-yellow-400";
+            return diff === 0;
+        }
+
+        async function onPostJournal() {
+            if(!calculateAll()) return alert("차변/대변 합계가 일치하지 않습니다.");
+            
+            const reqBizpt = document.getElementById('h-bizptcd').value;
+            const reqAnakey = document.getElementById('h-anakey').value;
+            const reqTax = document.getElementById('h-taxinfo').value;
+            const reqPctr = document.getElementById('h-pctrcd').value;
+            
+            if(!reqBizpt || !reqAnakey || !reqTax || !reqPctr) {
+                return alert("빨간색으로 표시된 필수 항목(거래처, 손익부서, 관리항목, 세금코드)을 검색하여 채워주세요.");
+            }
+            
+            let invalidGl = false;
+            document.querySelectorAll('.line-glname').forEach(el => { if(!el.value) invalidGl = true; });
+            if(invalidGl) return alert("빨간색으로 표시된 계정코드를 검색하여 정확히 입력해주세요.");
+
+            const pstdateEl = document.getElementById('h-pstdate').value;
+            
+            // 💡 수정: payload 키 값을 trandt로 변경
+            const postData = { 
+                user_id: "USER01", pattern_id: currentPatternId, bizptcd: reqBizpt, doctyp: document.getElementById('h-doctyp').value, 
+                pstdate: pstdateEl, docdate: document.getElementById('h-docdate').value || pstdateEl, 
+                trandt: document.getElementById('h-transdt').value || pstdateEl, 
+                currency: document.getElementById('h-currency').value, exrate: parseFloat(document.getElementById('h-exrate').value), 
+                taxcode: reqTax.split(' : ')[0], modify_reason: document.getElementById('h-modify').value, raw_text: document.getElementById('ai-input').value, 
+                lines: Array.from(document.querySelectorAll('#journal-tbody tr')).map(tr => ({ 
+                    debcre: tr.querySelector('.side-select').value, glmaster: tr.querySelector('.line-gl').value, bizamt: parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0, biztax: tr.dataset.isTax === "Y" ? (parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0) : 0, pctrcd: tr.querySelector('.line-pctr').value, anakey: tr.querySelector('.line-anakey').value, duedt: tr.querySelector('.line-duedt').value, text: tr.querySelector('.line-text').value 
+                })) 
+            };
+
+            try {
+                let res = await fetch(`${API_BASE}/journal-entries`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(postData) });
+                const data = await res.json();
+                if(data.status === 'success') { alert(`전표번호: ${data.slipno} 생성 완료`); location.reload(); }
+                else { alert(`저장 실패: ${data.message}`); }
+            } catch (err) { alert(`오류 발생: ${err.message}`); }
+        }
+
+        function fillHeader(e) { 
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('h-pstdate').value = e.date || today; 
+            document.getElementById('h-transdt').value = e.date || today; 
+            document.getElementById('h-doctyp').value = e.doctyp || 'GL'; 
+            document.getElementById('h-docdate').value = e.date || today;
+            document.getElementById('h-text').value = e.text || document.getElementById('ai-input').value.substring(0, 50);
+
+            document.getElementById('h-taxdate').value = e.tax_date || '';
+
+            const bizptBox = document.getElementById('bizpt-container');
+            if(!e.bizptcd) {
+                bizptBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
+                document.getElementById('h-bizptcd').value = ''; document.getElementById('h-bizname').value = e.bizname || '';
+            } else {
+                bizptBox.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
+                document.getElementById('h-bizptcd').value = e.bizptcd; document.getElementById('h-bizname').value = e.bizname;
+            }
+
+            const pctrBox = document.getElementById('pctr-container');
+            if(!e.pctrcd) { pctrBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-pctrcd').value = ''; document.getElementById('h-pctrnm').value = e.profit_center_name || ''; }
+            else { pctrBox.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-pctrcd').value = e.pctrcd; document.getElementById('h-pctrnm').value = e.pctrnm; syncPctrToLines(); }
+
+            const anaBox = document.getElementById('anakey-container');
+            if(!e.manaky) { anaBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-anakey').value = ''; document.getElementById('h-ananm').value = e.item_name || ''; }
+            else { anaBox.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-anakey').value = e.manaky; document.getElementById('h-ananm').value = e.mananm; syncAnaToLines(); }
+
+            const taxBox = document.getElementById('taxinfo-container');
+            if(!e.taxcd) { taxBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-taxinfo').value = ''; }
+            else { taxBox.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-taxinfo').value = e.taxcd + ' : ' + e.taxnm; }
+        }
+        
+        function openSearch(t, btn=null) { currentSearchType = t; activeLineBtn = btn; document.getElementById('search-modal').classList.remove('hidden'); document.getElementById('modal-results').innerHTML = ''; document.getElementById('modal-query').focus(); }
+        function closeModal() { document.getElementById('search-modal').classList.add('hidden'); }
+        
+        async function executeSearch() {
+            const q = document.getElementById('modal-query').value;
+            try {
+                let res = await fetch(`${API_BASE}/search/${currentSearchType}?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                if (data.length === 0) { document.getElementById('modal-results').innerHTML = '<div class="p-4 text-center text-slate-500">결과가 없습니다.</div>'; return; }
+                document.getElementById('modal-results').innerHTML = data.map(i => `<div onclick="selectItem('${i.code}','${i.name}', '${i.type||''}')" class="p-4 bg-white hover:bg-indigo-50 cursor-pointer border-b text-sm font-bold"><b>${i.code}</b> | <span>${i.name}</span></div>`).join('');
+            } catch(err) { alert(`검색 오류: ${err.message}`); }
+        }
+        
+        function selectItem(c, n, t) {
+            if(currentSearchType === 'bizpt') { document.getElementById('h-bizptcd').value = c; document.getElementById('h-bizname').value = n; document.getElementById('bizpt-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); }
+            else if(currentSearchType === 'pctr') { document.getElementById('h-pctrcd').value = c; document.getElementById('h-pctrnm').value = n; document.getElementById('pctr-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); syncPctrToLines(); }
+            else if(currentSearchType === 'anakey') { document.getElementById('h-anakey').value = c; document.getElementById('h-ananm').value = n; document.getElementById('anakey-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); syncAnaToLines(); }
+            else if(currentSearchType === 'taxkey') { document.getElementById('h-taxinfo').value = `${c} : ${n}`; document.getElementById('taxinfo-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); }
+            else if(currentSearchType === 'glmaster' && activeLineBtn) {
+                const tr = activeLineBtn.closest('tr');
+                tr.querySelector('.line-gl').value = c; tr.querySelector('.line-glname').value = n;
+                tr.querySelector('.gl-container').classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500');
+                tr.querySelector('.gl-container').classList.add('bg-white');
+                const dueInput = tr.querySelector('.line-duedt');
+                if(t === 'C' || t === 'S') { dueInput.disabled = false; dueInput.classList.remove('disabled-input'); }
+                else { dueInput.disabled = true; dueInput.classList.add('disabled-input'); dueInput.value = ''; }
+                markEdit();
+            }
+            closeModal();
+        }
+
+        function syncPctrToLines() { const v = document.getElementById('h-pctrcd').value; document.querySelectorAll('.line-pctr').forEach(i => i.value = v); }
+        function syncAnaToLines() { const v = document.getElementById('h-anakey').value; document.querySelectorAll('.line-anakey').forEach(i => i.value = v); }
+    </script>
+</body>
+</html>

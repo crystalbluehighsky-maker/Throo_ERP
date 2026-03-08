@@ -1,0 +1,60 @@
+-- [거래] 원장 개별라인(Body) 테이블
+CREATE TABLE t_lbody (
+    -- 기본키 (PK) 구성
+    comcd       VARCHAR(10)   NOT NULL, -- 회사코드
+    docno       VARCHAR(10)   NOT NULL, -- 전표번호
+    fisyr       NUMERIC(4)    NOT NULL, -- 회계연도 (회계기간)
+    lineno      NUMERIC(4)    NOT NULL, -- 라인아이템번호 (0001, 0002...)
+
+    -- 반제(Clearing) 및 관리 정보
+    cleardt     DATE,                   -- 정리날짜 (반제일)
+    cleardoc    VARCHAR(10),            -- 정리전표번호
+    bookey      CHAR(2),                -- 장부키 (C1:AR, C3:AR credit 등)
+    mulky       CHAR(1),                -- Multi Key (D:down pay. 등)
+    debcre      CHAR(1)       NOT NULL, -- 차대구분 지시자 (D:차변, C:대변)
+    glmaster    VARCHAR(6)    NOT NULL, -- GL계정코드
+    autotax     CHAR(1),                -- 세금자동계산 여부 (X)
+    gltype      CHAR(1),                -- 계정성격 (A:유무형자산, S:Supplier, C:Customer 등)
+    
+    -- 분석 및 조직 단위
+    bizcat      CHAR(4),                -- 사업구분 (1000:재무팀, 2000:영업1팀 등)
+    pctrcd      VARCHAR(10),            -- 손익부서코드
+    cctrcd      VARCHAR(10),            -- 비용부서코드
+    prjno       VARCHAR(30),            -- 프로젝트 번호
+    
+    -- 부분 반제 정보
+    pclrdoc     VARCHAR(10),            -- 부분반제전표번호
+    pclryr      NUMERIC(4),             -- 부분반제년도
+    pclrlin     NUMERIC(4),             -- 부분반제라인
+    
+    -- 지급 및 자금 관리
+    pmthd       CHAR(1),                -- 지급방법 (현금, 은행이체, 어음 등)
+    pblck       CHAR(1),                -- 지불보류 (A:지불보류 등)
+    pterm       CHAR(4),                -- 지급조건 (1000:즉시지급, 1100:30일 등)
+    basedt      DATE,                   -- 기산일 (만기계산 시작일)
+    dueday      NUMERIC(3),             -- 일수
+    duedt       DATE,                   -- 만기일
+    pbank       NUMERIC(4),             -- 지급 Bank Key
+    
+    -- 추가 분석키
+    anakey      CHAR(6),                -- 분석키 (0001:제품A, 0002:제품B 등)
+    macarea     NUMERIC(4),             -- 제조영역 (제조관련 비용 구분용)
+    
+    -- 금액 정보 (소수점 2자리 포함)
+    bizamt      NUMERIC(25, 2) DEFAULT 0, -- 거래통화금액
+    locamt      NUMERIC(25, 2) DEFAULT 0, -- Local 금액 (환산액)
+    biztax      NUMERIC(25, 2) DEFAULT 0, -- Base Tax 금액
+    loctax      NUMERIC(25, 2) DEFAULT 0, -- Local Base Tax 금액
+    
+    -- 기타 필드
+    assgn       VARCHAR(20),            -- Group Key (텍스트/정렬용)
+    lntext      VARCHAR(50),            -- 라인 아이템 텍스트 (적요)
+
+    -- 제약 조건
+    CONSTRAINT pk_t_lbody PRIMARY KEY (comcd, docno, fisyr, lineno),
+    -- 헤더와의 참조 무결성
+    CONSTRAINT fk_lbody_header FOREIGN KEY (comcd, docno, fisyr) 
+        REFERENCES t_lhead (comcd, docno, fisyr) ON DELETE CASCADE
+);
+
+COMMENT ON TABLE t_lbody IS '원장 개별라인 테이블 (Journal Line Item)';

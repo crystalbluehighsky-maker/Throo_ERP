@@ -1,0 +1,16 @@
+_totlg의 anakey필드명을 manaky(중분류키) 변경하고 자리수는 8자리로
+
+-- 1. 필드명 변경 (anakey -> manaky)
+ALTER TABLE t_totlg RENAME COLUMN anakey TO manaky;
+
+-- 2. 데이터 타입 길이 수정 (8자리로 변경)
+-- 기존 데이터가 8자리를 초과하는 경우 오류가 날 수 있으니 유의하세요.
+ALTER TABLE t_totlg ALTER COLUMN manaky TYPE VARCHAR(8);
+
+-- 3. (선택사항) 컬럼에 대한 설명 추가
+COMMENT ON COLUMN t_totlg.manaky IS '중분류키';
+
+-- 작업 내용 확인
+SELECT column_name, data_type, character_maximum_length 
+FROM information_schema.columns 
+WHERE table_name = 't_totlg' AND column_name = 'manaky';

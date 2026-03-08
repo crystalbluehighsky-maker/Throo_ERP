@@ -1,0 +1,2 @@
+-- 벡터 기능을 활성화합니다.
+CREATE EXTENSION IF NOT EXISTS vector;

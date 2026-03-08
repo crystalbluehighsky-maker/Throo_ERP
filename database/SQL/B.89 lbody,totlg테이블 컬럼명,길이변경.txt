@@ -1,0 +1,6 @@
+-- 1. t_lbody 테이블의 컬럼명 및 자리수 변경
+ALTER TABLE t_lbody RENAME COLUMN anakey TO manaky;
+ALTER TABLE t_lbody ALTER COLUMN manaky TYPE VARCHAR(8);
+
+-- 2. t_totlg 테이블의 컬럼명 및 자리수 변경 (manaky 8자리로 변경)
+ALTER TABLE t_totlg ALTER COLUMN manaky TYPE VARCHAR(8);

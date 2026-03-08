@@ -1,0 +1,17 @@
+DaBoM_R/
+├── core/               # 핵심 엔진 (비즈니스 로직)
+│   └── ai_engine.py    # AI 분개 처리 핵심 로직
+├── api/                # 서버 및 통신 관련
+│   ├── mainai.py       # 메인 API 서버
+│   └── serverlogin.py  # 로그인 처리
+├── database/           # 데이터베이스 관련
+│   ├── models.py       # DB 테이블 정의
+│   ├── database.py     # DB 연결 설정
+│   └── sql/            # SQL 쿼리 파일들 (현재 SQL 폴더)
+├── prompts/            # [신설] AI 지시서 및 예제
+│   ├── system_prompt.txt
+│   └── examples_si.json 
+├── templates/          # 화면(HTML) 파일들 (현재 존재)
+├── specs/              # 기획 문서 및 테이블 명세서 (현재 Spec 폴더)
+├── static/             # CSS, 이미지, JavaScript 파일
+└── requirements.txt    # 설치된 라이브러리 목록

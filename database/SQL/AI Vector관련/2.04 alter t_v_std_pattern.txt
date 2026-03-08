@@ -1,0 +1,1 @@
+-- ALTER TABLE t_v_user_learn RENAME COLUMN final_json TO journal_json;

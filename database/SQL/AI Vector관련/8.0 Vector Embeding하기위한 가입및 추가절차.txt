@@ -1,0 +1,22 @@
+https://dashboard.voyageai.com/accept-tos
+
+단계 1: API 키 발급 (my google id)
+Voyage AI Dashboard에 접속하여 회원가입(Google 계정 연동 가능)을 합니다.
+
+로그인 후 메인 화면에서 **"Create New API Key"**를 클릭하여 API 키를 복사해 둡니다.
+
+pa-N7bI6gFXwWTSZz3u_wKJKNEIwFlsak6N13VSyrUa_Hi
+
+단계 2: 라이브러리 설치
+파이썬 환경(서버/커서)에서 아래 명령어를 입력하여 전용 라이브러리를 설치합니다.
+
+Voyage AI 설치하는 방법
+
+1.pip 
+python -m pip install voyageai   
+
+2.혹시나 한번더 실행
+python -m pip install voyageai psycopg2-binary
+
+
+

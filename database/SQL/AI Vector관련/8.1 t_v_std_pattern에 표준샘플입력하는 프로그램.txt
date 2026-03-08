@@ -1,0 +1,61 @@
+import voyageai
+import psycopg2
+import json
+from psycopg2.extras import execute_values
+
+# 1. 설정 정보
+VOYAGE_API_KEY = "pa-N7bI6gFXwWTSZz3u_wKJKNEIwFlsak6N13VSyrUa_Hi"
+DB_CONFIG = {
+    "host": "localhost",
+    "database": "dabom_db",
+    "user": "postgres",
+    "password": "230509",
+    "port": 5432
+}
+
+# 2. Voyage AI 클라이언트 초기화
+vo = voyageai.Client(api_key=VOYAGE_API_KEY)
+
+def get_embedding(text):
+    """자연어를 1024차원 벡터로 변환"""
+    # 회계/금융 특화 모델인 voyage-finance-2 사용 권장
+    result = vo.embed([text], model="voyage-finance-2", input_type="document")
+    return result.embeddings[0]
+
+def insert_standard_pattern(data_list):
+    """표준 패턴 데이터를 DB에 저장"""
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+
+        for data in data_list:
+            print(f"처리 중: {data['pattern_nm']}...")
+            
+            # (1) 벡터 생성
+            embedding = get_embedding(data['example_tx'])
+            
+            # (2) SQL 실행
+            sql = """
+            INSERT INTO t_v_std_pattern (pattern_nm, example_tx, embedding, docty, journal_json)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            cur.execute(sql, (
+                data['pattern_nm'],
+                data['example_tx'],
+                embedding,
+                data['docty'],
+                json.dumps(data['journal_json'], ensure_ascii=False)
+            ))
+        
+        conn.commit()
+        print("\n✅ 모든 데이터가 성공적으로 저장되었습니다.")
+
+    except Exception as e:
+        print(f"❌ 오류 발생: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            cur.close()
+            conn.close()

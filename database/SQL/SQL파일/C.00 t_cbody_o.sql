@@ -1,0 +1,52 @@
+-- 테이블 생성: T_CBODY_O (customer AR 보조부_미결데이터)
+CREATE TABLE T_CBODY_O (
+    -- PK 영역
+    comcd       VARCHAR(10) NOT NULL,            -- 회사코드
+    custcd      VARCHAR(10) NOT NULL,            -- customer 코드
+    mulky       CHAR(1) NOT NULL,                -- multi key (예: D:down pay.)
+    clrdt       DATE NOT NULL,                   -- clearing date
+    clrdoc      VARCHAR(10) NOT NULL,            -- clearing 전표번호
+    fisyr       NUMERIC(4, 0) NOT NULL,          -- 회계기간 (원전표번호 회계연도)
+    docno       VARCHAR(10) NOT NULL,            -- 전표번호 (원전표번호)
+    lineno      NUMERIC(4, 0) NOT NULL,          -- 라인아이템번호 (0001 등)
+
+    -- 일반 필드 영역
+    docty       CHAR(2),                         -- 전표종류 (예: GL: General Doc)
+    invdt       DATE,                            -- 증빙일자
+    posdt       DATE,                            -- 전기일자
+    nodate      DATE,                            -- 정규전표생성일
+    reftx       VARCHAR(20),                     -- 참조내역
+    pclrdoc     VARCHAR(10),                     -- 부분반제전표번호
+    pclryr      NUMERIC(4, 0),                   -- 부분반제년도
+    pclrlin     NUMERIC(4, 0),                   -- 부분반제라인
+    curren      VARCHAR(5),                      -- 통화 (예: KRW)
+    bookey      CHAR(2),                         -- 장부키 (예: C1:AR, C3: AR credit)
+    prjno       VARCHAR(30),                     -- 프로젝트 번호
+    debcre      CHAR(1),                         -- 차대구분 지시자 (D:차변, C:대변)
+    glmaster    NUMERIC(6, 0),                   -- GL계정코드
+    taxcd       CHAR(2),                         -- Tax code
+    pmethod     VARCHAR(10),                     -- 지급방법 (길이 미정으로 임의 지정)
+    pblck       CHAR(1),                         -- 지불보류 (예: A)
+    pterm       CHAR(4),                         -- 지급조건 (예: 1000, 1100)
+    basedt      DATE,                            -- 기산일 (만기일 계산 시작일)
+    dueday      NUMERIC(3, 0),                   -- 일수
+    duedt       DATE,                            -- 만기일
+    
+    -- 금액 영역 (소수점 2자리 반영)
+    bizamt      NUMERIC(25, 2) DEFAULT 0,        -- 거래통화금액
+    locamt      NUMERIC(25, 2) DEFAULT 0,        -- Local 금액
+    biztax      NUMERIC(25, 2) DEFAULT 0,        -- base tax금액
+    loctax      NUMERIC(25, 2) DEFAULT 0,        -- Local base tax 금액
+    
+    -- 부서 및 기타 정보
+    pbank       NUMERIC(4, 0),                   -- 지급bank key
+    bizcat      CHAR(4),                         -- 사업구분 (예: 1000:재무팀)
+    pctrcd      VARCHAR(10),                     -- 손익부서코드
+    cctrcd      VARCHAR(10),                     -- 비용부서 코드
+
+    -- 기본키 제약 조건
+    CONSTRAINT PK_T_CBODY_O PRIMARY KEY (comcd, custcd, mulky, clrdt, clrdoc, fisyr, docno, lineno)
+);
+
+-- 검색 성능 향상을 위한 인덱스 추천 (거래처별, 전기일자별 조회용)
+CREATE INDEX IDX_T_CBODY_O_CUST ON T_CBODY_O (comcd, custcd, posdt);

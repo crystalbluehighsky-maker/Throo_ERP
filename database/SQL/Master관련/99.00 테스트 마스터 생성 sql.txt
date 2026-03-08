@@ -1,0 +1,53 @@
+-- 1. 기존 데이터 전체 삭제 (주의: 테스트 환경에서만 실행하세요)
+TRUNCATE TABLE t_company, t_nbank, t_nglmst, t_cglmst, t_cobank, 
+               t_cbkey, t_mbkey, t_cprocos, t_cbudget, t_cbizpt, t_cbizbk CASCADE;
+
+-- 2. 회사 마스터 생성 (모든 데이터의 뿌리)
+INSERT INTO t_company (comcd, comnm, use_yn) 
+VALUES ('1091264100', '(주)다봄회계시스템', 'Y');
+
+-- 3. 국가별 은행 코드 (표준)
+INSERT INTO t_nbank (bctry, bankcd, bnknm) 
+VALUES ('KR', '088', '신한은행'), ('KR', '004', '국민은행');
+
+-- 4. 표준 GL 계정 생성 (Template)
+INSERT INTO t_nglmst (glmaster, glname1, indbspl, currency, balyn) 
+VALUES ('101000', '현금', 'B', 'KRW', 'Y'), 
+       ('103000', '보통예금', 'B', 'KRW', 'Y'),
+       ('510100', '급여비용', 'P', 'KRW', 'N');
+
+-- 5. 회사별 GL 계정 복사
+INSERT INTO t_cglmst (comcd, glmaster, glname1, indbspl, currency, balyn)
+SELECT '1091264100', glmaster, glname1, indbspl, currency, balyn FROM t_nglmst;
+
+-- 6. 우리 회사 출금 계좌 생성 (t_cobank)
+INSERT INTO t_cobank (comcd, bctry, bankcd, branch, brchnm, bookid, booknm, acctno, currency, gl)
+VALUES ('1091264100', 'KR', '088', '088201', '신한-강남지점', 'sh01', '운영자금통장', '110-123-456789', 'KRW', '103000');
+
+-- 7. 분석키(제품군) 마스터 생성
+INSERT INTO t_cbkey (comcd, banaky, bananm) VALUES ('1091264100', 'CHAR0001', '의자제품군');
+INSERT INTO t_mbkey (comcd, manaky, mananm, banaky) VALUES ('1091264100', 'CHAR-L01', '긴다리의자', 'CHAR0001');
+
+-- 8. 손익부서 생성
+INSERT INTO t_cprocos (comcd, pctrcd, prcrnm, currency, manaky, banaky)
+VALUES ('1091264100', '0000001000', '영업1팀', 'KRW', 'CHAR-L01', 'CHAR0001');
+
+-- 9. 예산 설정 (2025년 5월, 영업1팀, 급여비용)
+INSERT INTO t_cbudget (comcd, yymm, glmaster, cctrcd, currency, bdgamt)
+VALUES ('1091264100', '202505', '510100', '0000001000', 'KRW', 50000000);
+
+-- 10. 거래처 메인 정보 생성
+INSERT INTO t_cbizpt (comcd, bizptcd, bizname1, bizadd1, bizceo, bizjong, biztae, biztax2, biztxname1, biztxemail1)
+VALUES ('1091264100', 'V000000001', '(주)나린공급사', '서울시 강남구', '나린 대표', '제조', '가구', '1234567890', '김세무', 'tax@narin.com');
+
+-- 11. 거래처 입금 계좌 생성 (t_cbizbk)
+INSERT INTO t_cbizbk (comcd, bizptcd, bnctry, bnkey, actno, hldnm)
+VALUES ('1091264100', 'V000000001', 'KR', '004', '999-888-777666', '(주)나린공급사');
+
+--12,  환율
+-- 환율 샘플 데이터 입력 (2025년 6월~8월 환율)
+INSERT INTO t_nexrate (extype, srccur, tarcur, date, exrat) VALUES
+('S', 'USD', 'KRW', '2025-06-30', 1400.35000),
+('S', 'USD', 'KRW', '2025-07-01', 1500.00000),
+('S', 'USD', 'KRW', '2025-07-30', 1300.05000),
+('S', 'USD', 'KRW', '2025-08-01', 1350.03000);
