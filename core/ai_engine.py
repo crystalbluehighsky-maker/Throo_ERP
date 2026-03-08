@@ -3,6 +3,11 @@ import os, json, anthropic, voyageai, re, asyncio
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import logging
+from dotenv import load_dotenv
+
+# .env 로드
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 logger = logging.getLogger("DaBom_AI_Engine")
 
@@ -10,6 +15,15 @@ class DabomHybridEngine:
     def __init__(self):
         self.vo = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
         self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        # Load prompt template
+        try:
+            prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "journal_generation.txt")
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                self.system_prompt_template = f.read()
+        except Exception as e:
+            logger.error(f"Failed to load prompt template: {e}")
+            self.system_prompt_template = "" # Fallback or error handling
 
     async def get_embedding(self, text_input: str) -> list:
         result = self.vo.embed([text_input], model="voyage-3")
@@ -37,45 +51,10 @@ class DabomHybridEngine:
             pattern_guide = f"### [필수 참조 패턴]\n{json.dumps(parsed_pattern, ensure_ascii=False)}"
 
         # 2. AI 지시문
-        prompt = f"""당신은 데이터를 JSON으로만 변환하는 기계입니다. 회계적 지식을 임의로 발휘하지 마십시오.
-
-[분개 상세(lines) 생성 절대 규칙 - 1순위]
-- 하단에 '[필수 참조 패턴]'이 주어졌다면: 그 안의 'lines' 배열 구조(debcre, glmaster, type 등)를 단 한 글자도 바꾸지 말고 100% 똑같이 복사하십시오.
-
-[분개 상세(lines) 생성 절대 규칙 - 2순위 (패턴이 없을 때)]
-- 패턴이 주어지지 않았다면, 반드시 아래의 고정된 배열 중 하나를 선택하여 '그대로' 출력하십시오.
-  1) 매출(CI) 거래일 경우 (무조건 3줄):
-     [
-       {{ "debcre": "D", "glmaster": "110000", "type": "AR", "text": "적요" }},
-       {{ "debcre": "C", "glmaster": "410000", "type": "REV", "text": "적요" }},
-       {{ "debcre": "C", "glmaster": "214000", "type": "TAX", "text": "적요" }}
-     ]
-  2) 매입(SI) 거래일 경우 (무조건 3줄):
-     [
-       {{ "debcre": "D", "glmaster": "비용계정", "type": "EXP", "text": "적요" }},
-       {{ "debcre": "D", "glmaster": "135000", "type": "TAX", "text": "적요" }},
-       {{ "debcre": "C", "glmaster": "253000", "type": "AP", "text": "적요" }}
-     ]
-
-[기타 데이터 추출 규칙]
-- 전표유형: 매출(CI), 매입(SI), 일반(GL)
-- 금액: 부가세 포함 총액
-- 거래처명(bizname), 품목명(item_name), 손익부서명(profit_center_name) 추출. (없으면 무조건 "" 처리)
-- 날짜 추출 (반드시 YYYY-MM-DD 포맷으로 변환할 것. 예: 26.3.31 -> 2026-03-31):
-  1. (세금)계산서 발행일: 문장에 "세금계산서 발행일", "계산서 발행일", "발행일"이 있으면 `tax_date`에 추출. 없으면 "".
-  2. 만기일(결제일): 문장에 "입금일", "입금일자", "출금일", "출금일자", "지급일자", "만기일", "만기일자"가 있으면 `due_date`에 추출. 없으면 "".
-
-[출력 포맷 예시]
-{{
-  "bizname": "...", "item_name": "...", "profit_center_name": "", 
-  "date": "YYYY-MM-DD", "tax_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD",
-  "doctyp": "CI", "vat_rate": 10, "total_amount": 2200000, 
-  "lines": [위 규칙에 따른 배열 삽입]
-}}
-
-[사용자 입력]: {raw_text}
-{pattern_guide}
-"""
+        if not self.system_prompt_template:
+             raise Exception("System prompt template not loaded.")
+             
+        prompt = self.system_prompt_template.replace("{{RAW_TEXT}}", raw_text).replace("{{PATTERN_GUIDE}}", pattern_guide)
 
         max_retries = 3
         resp_text = ""

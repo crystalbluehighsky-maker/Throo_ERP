@@ -4,9 +4,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from database import get_db
-from models import AiParseRequest, JournalPostRequest
-from ai_engine import DabomHybridEngine
+from database.database import get_db
+from database.models import AiParseRequest, JournalPostRequest
+from core.ai_engine import DabomHybridEngine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DaBom_AI_System")
