@@ -352,8 +352,15 @@
             const isDue = isArApLine || (line.gltype === 'C' || line.gltype === 'S');
             const dueClass = isDue ? '' : 'disabled-input';
             const dueDisabled = isDue ? '' : 'disabled';
-            // AP 라인이면 라인별 duedt 우선, 없으면 전달된 dueDate(헤더) fallback
             const finalDueDate = isDue ? (line.duedt || dueDate || '') : '';
+
+            // 거래처 마스터 계정 자동매핑 라인 잠금 (수동 선택과 동일한 biz-gl-locked 처리)
+            const isBizGlLocked = !!line.biz_gl_locked;
+            if (isBizGlLocked) tr.dataset.glLocked = 'true';
+            const glInputClass  = isBizGlLocked ? 'biz-gl-locked' : '';
+            const glNameClass   = isBizGlLocked ? 'biz-gl-locked' : 'text-slate-500';
+            const glBtnClass    = isBizGlLocked ? 'biz-gl-locked-btn' : 'bg-slate-50 hover:bg-slate-200 cursor-pointer';
+            const glBtnDisabled = isBizGlLocked ? 'disabled' : '';
             
             const glBoxClass = line.glname ? 'bg-white' : 'bg-red-50 border-red-500 ring-1 ring-red-500';
 
@@ -374,11 +381,11 @@
                 <td class="p-2"><select class="side-select cell-input cursor-pointer" onchange="markEdit(); calculateAll()"><option value="D" ${line.debcre==='D'?'selected':''}>차변</option><option value="C" ${line.debcre==='C'?'selected':''}>대변</option></select></td>
                 <td class="p-2">
                     <div class="flex border rounded overflow-hidden ${glBoxClass} gl-container">
-                        <input type="text" class="cell-input font-mono line-gl w-full border-none" value="${line.glmaster||''}" readonly>
-                        <button onclick="openSearch('glmaster', this)" class="bg-slate-50 px-2 border-l text-slate-500 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        <input type="text" class="cell-input font-mono line-gl w-full border-none ${glInputClass}" value="${line.glmaster||''}" readonly>
+                        <button onclick="openSearch('glmaster', this)" class="px-2 border-l text-slate-500 ${glBtnClass}" ${glBtnDisabled}><i class="fa-solid fa-magnifying-glass"></i></button>
                     </div>
                 </td>
-                <td class="p-2"><input type="text" class="cell-input line-glname text-slate-500" value="${line.glname||''}" readonly placeholder="계정 검색 필요"></td>
+                <td class="p-2"><input type="text" class="cell-input line-glname ${glNameClass}" value="${line.glname||''}" readonly placeholder="계정 검색 필요"></td>
                 <td class="p-2"><input type="text" class="cell-input text-right amt-input font-bold" value="${amt.toLocaleString()}" onkeyup="this.value=Number(this.value.replace(/\\D/g,'')).toLocaleString(); calculateAll();"></td>
                 <td class="p-3 text-right font-bold loc-amt-display text-slate-500">0</td>
                 <td class="p-2"><input type="text" class="cell-input line-pctr" value="${line.pctrcd||''}" oninput="markEdit()"></td>

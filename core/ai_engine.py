@@ -218,9 +218,29 @@ class DabomHybridEngine:
             # 3. 마스터 DB 정밀 매핑
             bn = result_json.get("bizname", "")
             result_json["bizptcd"] = ""
+            biz_suppgl, biz_custgl = "", ""   # AP/AR 기본 계정 (거래처 마스터)
             if bn:
-                row = db.execute(text("SELECT bizptcd, bizname1 FROM t_cbizpt WHERE comcd=:c AND bizname1 ILIKE :n LIMIT 1"), {"c": comcd, "n": f"%{bn}%"}).fetchone()
-                if row: result_json["bizptcd"], result_json["bizname"] = row[0], row[1]
+                row = db.execute(
+                    text("SELECT bizptcd, bizname1, suppgl, custgl FROM t_cbizpt WHERE comcd=:c AND bizname1 ILIKE :n LIMIT 1"),
+                    {"c": comcd, "n": f"%{bn}%"}
+                ).fetchone()
+                if row:
+                    result_json["bizptcd"], result_json["bizname"] = row[0], row[1]
+                    biz_suppgl = row[2] or ""   # SI(매입) → AP 라인 강제 계정
+                    biz_custgl = row[3] or ""   # CI(매출) → AR 라인 강제 계정
+
+            # ★ 거래처 마스터 계정 선적용: GL 검증 루프 전에 Override해야
+            #   아래 GL 검증 로직이 올바른 코드로 glname/gltype을 자동 확보함
+            for line in result_json.get("lines", []):
+                l_type = line.get("type", "")
+                if l_type == "AR" and biz_custgl:
+                    line["glmaster"]      = biz_custgl
+                    line["biz_gl_locked"] = True
+                    logger.info(f"AR line custgl override: {biz_custgl}")
+                elif l_type == "AP" and biz_suppgl:
+                    line["glmaster"]      = biz_suppgl
+                    line["biz_gl_locked"] = True
+                    logger.info(f"AP line suppgl override: {biz_suppgl}")
 
             im = result_json.get("item_name", "")
             result_json["manaky"], result_json["mananm"] = "", ""
