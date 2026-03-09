@@ -188,14 +188,40 @@
         function onExampleChange() {
             const val = document.getElementById('example-select').value;
             const displayEl = document.getElementById('example-display');
-            
             if (val && examples[val]) {
-                // 입력창에 값을 넣지 않고, 옆에 텍스트로만 보여줌
                 displayEl.textContent = examples[val].text;
-                displayEl.title = examples[val].text; // 마우스 오버 시 전체 내용 확인
+                displayEl.title = examples[val].text;
             } else {
                 displayEl.textContent = "";
                 displayEl.title = "";
+            }
+        }
+
+        // t_v_std_pattern에서 학습된 패턴 목록을 가져와 드롭다운에 동적 추가
+        async function loadDbPatterns() {
+            try {
+                const res = await fetch(`${API_BASE}/patterns`);
+                if (!res.ok) return;
+                const patterns = await res.json();
+                if (!Array.isArray(patterns) || patterns.length === 0) return;
+
+                const sel = document.getElementById('example-select');
+                const sep = document.createElement('option');
+                sep.disabled = true;
+                sep.textContent = '─── 학습된 DB 패턴 ───';
+                sel.appendChild(sep);
+
+                patterns.forEach(p => {
+                    const key = `db_${p.id}`;
+                    // 동일한 examples 맵에 추가하여 onExampleChange()가 그대로 동작
+                    examples[key] = { label: p.pattern_nm, text: p.example_tx || '' };
+                    const opt = document.createElement('option');
+                    opt.value = key;
+                    opt.textContent = `${p.pattern_nm}${p.docty ? ' (' + p.docty + ')' : ''}`;
+                    sel.appendChild(opt);
+                });
+            } catch (e) {
+                console.warn('DB 패턴 로드 실패:', e);
             }
         }
 
@@ -242,21 +268,28 @@
         }
 
         function onDoctypChange() {
-            const isGL = document.getElementById('h-doctyp').value === 'GL';
+            const doctyp = document.getElementById('h-doctyp').value;
+            const isGL   = doctyp === 'GL';
 
-            // 라벨 포함 전체 필드 그룹에 .gl-disabled 토글 (시각적으로 완전히 비활성화)
+            // 라벨 포함 전체 필드 그룹에 .gl-disabled 토글 (시각적으로 완전히 비활성화/활성화)
             ['bizpt-group', 'taxinfo-group', 'taxdate-group'].forEach(id => {
                 document.getElementById(id).classList.toggle('gl-disabled', isGL);
             });
 
             if (isGL) {
-                // 빨간 테두리 제거 + 값 초기화
+                // GL 전환: 빨간 테두리 제거 + 값 초기화
                 document.getElementById('bizpt-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
                 document.getElementById('taxinfo-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
                 document.getElementById('h-bizptcd').value = '';
                 document.getElementById('h-bizname').value = '';
                 document.getElementById('h-taxinfo').value = '';
                 document.getElementById('h-taxdate').value = '';
+            } else {
+                // CI/SI 전환: gl-disabled 제거로 자동 활성화됨 — 오버레이 해제 확인을 위해 강제 repaint
+                ['bizpt-group', 'taxinfo-group', 'taxdate-group'].forEach(id => {
+                    const el = document.getElementById(id);
+                    el.classList.remove('gl-disabled'); // toggle이 이미 제거하지만 명시적으로 재확인
+                });
             }
         }
 
@@ -486,6 +519,9 @@
 
         function syncPctrToLines() { const v = document.getElementById('h-pctrcd').value; document.querySelectorAll('.line-pctr').forEach(i => i.value = v); }
         function syncAnaToLines() { const v = document.getElementById('h-anakey').value; document.querySelectorAll('.line-anakey').forEach(i => i.value = v); }
+
+        // 페이지 로드 시 DB 학습 패턴을 드롭다운에 추가
+        loadDbPatterns();
     </script>
 </body>
 </html>

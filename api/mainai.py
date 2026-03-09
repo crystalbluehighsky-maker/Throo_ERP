@@ -176,6 +176,14 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
         logger.error(f"Posting Error: {str(e)}")
         return {"status": "error", "message": str(e)}
 
+@router.get("/api/patterns")
+async def get_std_patterns(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """t_v_std_pattern의 패턴 목록 반환 — 상황별 예제 드롭다운에서 사용"""
+    rows = db.execute(text(
+        "SELECT id, pattern_nm, example_tx, docty FROM t_v_std_pattern ORDER BY id DESC LIMIT 100"
+    )).fetchall()
+    return [{"id": r[0], "pattern_nm": r[1], "example_tx": r[2], "docty": r[3]} for r in rows]
+
 @router.get("/api/search/{search_type}")
 async def master_search(search_type: str, q: str = "", db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     comcd = current_user["comcd"]

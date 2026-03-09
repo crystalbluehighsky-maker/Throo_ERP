@@ -66,29 +66,41 @@ class DabomHybridEngine:
         doctype_hint = self._detect_doctype_hint(raw_text)
         logger.info(f"Doctype hint: {doctype_hint} for: '{raw_text[:40]}'")
 
-        # 1. Vector DB 검색 (RAG) — 쿼리용 임베딩 사용
+        # 1. Vector DB 검색 (RAG) — 쿼리용 임베딩, docty 컬럼 포함 조회
         vec = await self.get_embedding(raw_text, input_type="query")
         query = text("""
-            SELECT id, journal_json, (embedding <=> :v) as dist FROM t_v_std_pattern
+            SELECT id, journal_json, docty, (embedding <=> :v) as dist FROM t_v_std_pattern
             UNION ALL
-            SELECT id, final_json as journal_json, (embedding <=> :v) as dist FROM t_v_user_learn WHERE comcd = :c
+            SELECT id, final_json AS journal_json, NULL::text AS docty, (embedding <=> :v) AS dist
+            FROM t_v_user_learn WHERE comcd = :c
             ORDER BY dist ASC LIMIT 1
         """)
         cand = db.execute(query, {"v": str(vec), "c": comcd}).fetchone()
 
-        pattern_id      = None
-        pattern_guide   = ""
+        pattern_id          = None
+        pattern_guide       = ""
         gl_fallback_matched = False
+        effective_docty     = doctype_hint  # 기본값: Python 키워드 힌트
 
         if cand and (1 - cand.dist) > 0.55:
-            # Vector DB 패턴 매칭 성공 → 패턴 구조 우선 사용
+            # ── 1순위: Vector DB 패턴 매칭 성공 → DB 패턴의 docty 사용 ──
             pattern_id = cand.id
-            raw_data = cand.journal_json
+            db_docty   = (cand.docty or 'GL').strip().upper()
+            raw_data   = cand.journal_json
             parsed_pattern = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-            pattern_guide = f"### [필수 참조 패턴]\n{json.dumps(parsed_pattern, ensure_ascii=False)}"
-            logger.info(f"Vector DB matched pattern_id={pattern_id} (dist={cand.dist:.4f})")
+            pattern_guide  = f"### [필수 참조 패턴]\n{json.dumps(parsed_pattern, ensure_ascii=False)}"
+
+            # ── 2순위 안전장치: DB가 GL이어도 AR/AP 키워드가 명확하면 CI/SI 강제 전환 ──
+            if db_docty == 'GL' and doctype_hint in ('CI', 'SI'):
+                effective_docty = doctype_hint
+                logger.info(f"Doctype override: DB=GL → keyword_hint={doctype_hint} (safety net)")
+            else:
+                effective_docty = db_docty
+
+            logger.info(f"Vector DB match: id={pattern_id} dist={cand.dist:.4f} effective_docty={effective_docty}")
         else:
-            # Vector DB 매칭 실패 → 힌트 유형별 분기
+            # Vector DB 매칭 실패 → 키워드 힌트 기반으로 분기
+            effective_docty = doctype_hint
             if doctype_hint == 'GL':
                 # GL: 계정과목 마스터에서 키워드 검색 (2-tier fallback)
                 kw_set = set()
@@ -139,10 +151,10 @@ class DabomHybridEngine:
                 # CI/SI: 프롬프트 내 고정 템플릿으로 AI가 직접 처리 (별도 DB 검색 불필요)
                 logger.info(f"No vector match, hint={doctype_hint}, delegating to AI standard template")
 
-        # 사전 분류 힌트를 프롬프트에 주입 (AI 최종 판단의 가이드라인으로 활용)
+        # 결정된 전표 유형을 AI 프롬프트에 강제 지시 (하이브리드 결과 — AI가 임의 변경 금지)
         hint_section = (
-            f"\n### [사전 분류 힌트] 전표유형 추론 결과: {doctype_hint}"
-            f" — 패턴이 없을 때 이 유형의 고정 템플릿을 우선 적용할 것"
+            f"\n### [전표유형 최종 결정] doctyp은 반드시 '{effective_docty}'로만 출력할 것"
+            f" (DB패턴 + 키워드 분석 하이브리드 결과)"
         )
 
         # 2. AI 지시문 구성
@@ -186,6 +198,8 @@ class DabomHybridEngine:
             
             result_json = json.loads(re.sub(r',\s*([\]}])', r'\1', resp_text), strict=False)
             result_json['pattern_id'] = pattern_id
+            # 하이브리드 결정 전표유형 강제 적용 (DB패턴 + 키워드 분석 결과 → AI 응답 override)
+            result_json['doctyp'] = effective_docty
             # Vector DB 패턴 매칭 또는 GL 계정마스터 fallback 검색 성공 시 "DB", 순수 AI 생성 시 "AI"
             result_json['source'] = "DB" if (pattern_id or gl_fallback_matched) else "AI"
             
