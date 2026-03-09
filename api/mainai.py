@@ -63,7 +63,8 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
         month_str = f"{int(req.pstdate[5:7]):02d}"
         
         # 임베딩 생성 (학습 데이터용)
-        vec_str = str(await engine.get_embedding(req.raw_text)) if not req.pattern_id else None
+        # 학습 데이터 저장용 임베딩은 "document" 타입 사용 (검색용 "query"와 구분)
+        vec_str = str(await engine.get_embedding(req.raw_text, input_type="document")) if not req.pattern_id else None
         
         now = datetime.now()
         sys_entdt = now.strftime("%Y-%m-%d")

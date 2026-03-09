@@ -12,27 +12,62 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 logger = logging.getLogger("DaBom_AI_Engine")
 
 class DabomHybridEngine:
+    # 전표 유형 사전 분류용 키워드 정의
+    _AR_KEYWORDS  = ['매출', '입금', '수금', '판매', '납품', '청구', '세금계산서 발행']
+    _AP_KEYWORDS  = ['매입', '지급', '송금', '구매', '발주', '구입', '결제', '출금', '세금계산서 수취']
+    # 거래처 상호 탐지: 법인격 키워드 또는 업종명 포함 패턴
+    _COUNTERPARTY_RE = re.compile(
+        r'(?:㈜|주식회사|\(주\)|유한회사|\(유\))[가-힣A-Za-z\s]{1,10}'
+        r'|[가-힣A-Za-z]{2,8}(?:주식회사|㈜|\(주\)|유한회사|\(유\))'
+        r'|[가-힣]{2,5}(?:전자|화학|건설|물산|통신|식품|유통|제약|은행|자동차|시스템|솔루션|물류|에너지)'
+    )
+
     def __init__(self):
         self.vo = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
         self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        
-        # Load prompt template
+
         try:
             prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "journal_generation.txt")
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt_template = f.read()
         except Exception as e:
             logger.error(f"Failed to load prompt template: {e}")
-            self.system_prompt_template = "" # Fallback or error handling
+            self.system_prompt_template = ""
 
-    async def get_embedding(self, text_input: str) -> list:
-        result = self.vo.embed([text_input], model="voyage-3")
+    def _detect_doctype_hint(self, raw_text: str) -> str:
+        """
+        Python 규칙 기반 전표 유형 1차 추론 (AI 호출 전).
+        - 거래처 탐지 + AR 방향 키워드 → CI (매출)
+        - 거래처 탐지 + AP 방향 키워드 → SI (매입)
+        - 거래처 미탐지 또는 방향 불명확 → GL (일반) 기본값
+        """
+        has_counterparty = bool(self._COUNTERPARTY_RE.search(raw_text))
+        has_ar = any(kw in raw_text for kw in self._AR_KEYWORDS)
+        has_ap = any(kw in raw_text for kw in self._AP_KEYWORDS)
+
+        if has_counterparty:
+            if has_ar and not has_ap:
+                return 'CI'
+            if has_ap and not has_ar:
+                return 'SI'
+        return 'GL'
+
+    async def get_embedding(self, text_input: str, input_type: str = "query") -> list:
+        """
+        Voyage AI voyage-3 임베딩 생성.
+        - 벡터 DB 검색(쿼리)  → input_type="query"   (기본값)
+        - 패턴 저장(문서 삽입) → input_type="document"
+        """
+        result = self.vo.embed([text_input], model="voyage-3", input_type=input_type)
         return result.embeddings[0]
 
     async def generate_final_journal(self, db: Session, comcd: str, raw_text: str):
-        vec = await self.get_embedding(raw_text)
+        # 0. Python 규칙 기반 전표 유형 사전 추론
+        doctype_hint = self._detect_doctype_hint(raw_text)
+        logger.info(f"Doctype hint: {doctype_hint} for: '{raw_text[:40]}'")
 
-        # 1. Vector DB 검색 (RAG)
+        # 1. Vector DB 검색 (RAG) — 쿼리용 임베딩 사용
+        vec = await self.get_embedding(raw_text, input_type="query")
         query = text("""
             SELECT id, journal_json, (embedding <=> :v) as dist FROM t_v_std_pattern
             UNION ALL
@@ -41,66 +76,84 @@ class DabomHybridEngine:
         """)
         cand = db.execute(query, {"v": str(vec), "c": comcd}).fetchone()
 
-        pattern_id = None
-        pattern_guide = ""
-        gl_fallback_matched = False  # GL 계정마스터 키워드 매칭 성공 여부
+        pattern_id      = None
+        pattern_guide   = ""
+        gl_fallback_matched = False
 
         if cand and (1 - cand.dist) > 0.55:
-            # Vector DB 패턴 매칭 성공
+            # Vector DB 패턴 매칭 성공 → 패턴 구조 우선 사용
             pattern_id = cand.id
             raw_data = cand.journal_json
             parsed_pattern = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
             pattern_guide = f"### [필수 참조 패턴]\n{json.dumps(parsed_pattern, ensure_ascii=False)}"
+            logger.info(f"Vector DB matched pattern_id={pattern_id} (dist={cand.dist:.4f})")
         else:
-            # Vector DB 매칭 실패: 원문 한글 키워드로 계정과목 마스터 검색
-            # 2~5글자 한글 토큰을 점진적으로 단축해 ILIKE 매칭 가능성을 높임
-            kw_set = set()
-            for word in re.findall(r'[가-힣]{2,}', raw_text):
-                for ln in range(min(len(word), 5), 1, -1):
-                    kw_set.add(word[:ln])
-            keywords = list(kw_set)[:12]
+            # Vector DB 매칭 실패 → 힌트 유형별 분기
+            if doctype_hint == 'GL':
+                # GL: 계정과목 마스터에서 키워드 검색 (2-tier fallback)
+                kw_set = set()
+                for word in re.findall(r'[가-힣]{2,}', raw_text):
+                    for ln in range(min(len(word), 5), 1, -1):
+                        kw_set.add(word[:ln])
+                keywords = list(kw_set)[:12]
 
-            seen_gl = set()
-            gl_hints = []
+                seen_gl = set()
+                gl_hints = []
 
-            # 1순위: 회사 사용 계정 t_cglmst (comcd 필터)
-            for kw in keywords:
-                rows = db.execute(
-                    text("SELECT glmaster, glname1, gltype FROM t_cglmst WHERE comcd=:c AND glname1 ILIKE :k LIMIT 3"),
-                    {"c": comcd, "k": f"%{kw}%"}
-                ).fetchall()
-                for row in rows:
-                    if row[0] not in seen_gl:
-                        seen_gl.add(row[0])
-                        gl_hints.append({"src": "cgl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
-                if len(gl_hints) >= 8:
-                    break
-
-            # 2순위: t_cglmst 미검색 시 전체 표준 계정 t_nglmst (comcd 조건 없음)
-            if not gl_hints:
+                # 1순위: 회사 사용 계정 t_cglmst
                 for kw in keywords:
                     rows = db.execute(
-                        text("SELECT glmaster, glname1, gltype FROM t_nglmst WHERE glname1 ILIKE :k LIMIT 3"),
-                        {"k": f"%{kw}%"}
+                        text("SELECT glmaster, glname1, gltype FROM t_cglmst WHERE comcd=:c AND glname1 ILIKE :k LIMIT 3"),
+                        {"c": comcd, "k": f"%{kw}%"}
                     ).fetchall()
                     for row in rows:
                         if row[0] not in seen_gl:
                             seen_gl.add(row[0])
-                            gl_hints.append({"src": "ngl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
+                            gl_hints.append({"src": "cgl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
                     if len(gl_hints) >= 8:
                         break
 
-            if gl_hints:
-                src_label = "회사계정(t_cglmst)" if gl_hints[0]["src"] == "cgl" else "표준계정(t_nglmst)"
-                pattern_guide = f"### [계정과목 마스터 참조 후보({src_label}) - 아래 중 적절한 계정 사용]\n{json.dumps(gl_hints, ensure_ascii=False)}"
-                gl_fallback_matched = True
-                logger.info(f"GL fallback({src_label}) matched {len(gl_hints)} accounts for: '{raw_text[:30]}'")
+                # 2순위: 전체 표준 계정 t_nglmst
+                if not gl_hints:
+                    for kw in keywords:
+                        rows = db.execute(
+                            text("SELECT glmaster, glname1, gltype FROM t_nglmst WHERE glname1 ILIKE :k LIMIT 3"),
+                            {"k": f"%{kw}%"}
+                        ).fetchall()
+                        for row in rows:
+                            if row[0] not in seen_gl:
+                                seen_gl.add(row[0])
+                                gl_hints.append({"src": "ngl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
+                        if len(gl_hints) >= 8:
+                            break
 
-        # 2. AI 지시문
+                if gl_hints:
+                    src_label = "회사계정(t_cglmst)" if gl_hints[0]["src"] == "cgl" else "표준계정(t_nglmst)"
+                    pattern_guide = (
+                        f"### [계정과목 마스터 참조 후보({src_label}) - 아래 중 적절한 계정 사용]\n"
+                        f"{json.dumps(gl_hints, ensure_ascii=False)}"
+                    )
+                    gl_fallback_matched = True
+                    logger.info(f"GL fallback({src_label}) matched {len(gl_hints)} accounts")
+            else:
+                # CI/SI: 프롬프트 내 고정 템플릿으로 AI가 직접 처리 (별도 DB 검색 불필요)
+                logger.info(f"No vector match, hint={doctype_hint}, delegating to AI standard template")
+
+        # 사전 분류 힌트를 프롬프트에 주입 (AI 최종 판단의 가이드라인으로 활용)
+        hint_section = (
+            f"\n### [사전 분류 힌트] 전표유형 추론 결과: {doctype_hint}"
+            f" — 패턴이 없을 때 이 유형의 고정 템플릿을 우선 적용할 것"
+        )
+
+        # 2. AI 지시문 구성
         if not self.system_prompt_template:
-             raise Exception("System prompt template not loaded.")
-             
-        prompt = self.system_prompt_template.replace("{{RAW_TEXT}}", raw_text).replace("{{PATTERN_GUIDE}}", pattern_guide)
+            raise Exception("System prompt template not loaded.")
+
+        prompt = (
+            self.system_prompt_template
+            .replace("{{RAW_TEXT}}", raw_text)
+            .replace("{{PATTERN_GUIDE}}", f"{hint_section}\n{pattern_guide}")
+        )
 
         max_retries = 3
         resp_text = ""
