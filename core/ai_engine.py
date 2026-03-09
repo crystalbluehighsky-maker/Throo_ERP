@@ -87,6 +87,8 @@ class DabomHybridEngine:
             
             result_json = json.loads(re.sub(r',\s*([\]}])', r'\1', resp_text), strict=False)
             result_json['pattern_id'] = pattern_id
+            # pattern_id가 있으면 DB 벡터 검색으로 참조한 것, 없으면 AI가 순수 생성한 것
+            result_json['source'] = "DB" if pattern_id else "AI"
             
             # 💡 [핵심 추가] 파이썬 백엔드 수학적 금액 강제 계산 로직
             tot = float(result_json.get("total_amount", 0))

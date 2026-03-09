@@ -1,6 +1,7 @@
 # serverlogin.py
 import uvicorn
 import sys, os
+import json
 
 # 프로젝트 루트(상위 폴더)를 sys.path에 추가하여 모듈 인식 가능하게 함
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,7 +50,17 @@ async def show_dashboard(request: Request, comcd: str):
 
 @app.get("/aipost.html")
 async def show_aipost(request: Request):
-    return templates.TemplateResponse("aipost.html", {"request": request})
+    # JSON 파일에서 예제 데이터 로드
+    example_path = os.path.join(BASE_DIR, "prompts", "examples.json")
+    examples = {}
+    if os.path.exists(example_path):
+        try:
+            with open(example_path, "r", encoding="utf-8") as f:
+                examples = json.load(f)
+        except Exception as e:
+            print(f"[ERROR] Failed to load examples.json: {e}")
+
+    return templates.TemplateResponse("aipost.html", {"request": request, "examples": examples})
 
 app.include_router(ai_router)
 
