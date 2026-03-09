@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>다봄 AI 표준 지식 관리자</title>
+    <style>
+        body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 20px; }
+        .container { max-width: 1100px; margin: auto; display: flex; flex-direction: column; gap: 20px; }
+        .section { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        h2 { margin-top: 0; color: #2c3e50; border-left: 5px solid #6366f1; padding-left: 15px; }
+        .flex-row { display: flex; gap: 15px; margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9em; color: #4b5563; }
+        input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #eee; padding: 12px; text-align: center; font-size: 0.9em; }
+        th { background: #f9fafb; color: #374151; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-save { background: #6366f1; color: white; width: 100%; font-size: 1.1em; margin-top: 20px; }
+        .btn-save:hover { background: #4f46e5; }
+        .btn-edit { background: #f59e0b; color: white; }
+        .btn-del { background: #ef4444; color: white; }
+        .btn-add { background: #10b981; color: white; float: right; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="section">
+        <h2>📝 표준 분개 패턴 등록</h2>
+        <input type="hidden" id="edit-id" value="">
+        <div class="flex-row">
+            <div style="flex: 2;"><label>패턴명</label><input type="text" id="pattern_nm" placeholder="예: 비용지출_법인카드(GL)"></div>
+            <div style="flex: 1;"><label>유형</label>
+                <select id="docty">
+                    <option value="GL">일반(GL)</option>
+                    <option value="CI">매출(CI)</option>
+                    <option value="SI">매입(SI)</option>
+                </select>
+            </div>
+            <div style="flex: 1;"><label>통화</label><input type="text" id="currency" value="KRW"></div>
+        </div>
+        <label>자연어 예시 (example_tx)</label>
+        <textarea id="example_tx" rows="2" placeholder="AI가 학습할 문장을 입력하세요."></textarea>
+
+        <div style="margin-top: 20px;">
+            <button class="btn btn-add" onclick="addRow()">+ 줄 추가</button>
+            <table id="jTable">
+                <thead><tr><th>차/대</th><th>계정코드</th><th>계정명</th><th>금액</th><th>관리</th></tr></thead>
+                <tbody id="journal-body">
+                    <tr>
+                        <td><select class="side"><option value="D">차변</option><option value="C">대변</option></select></td>
+                        <td><input type="text" class="acct"></td>
+                        <td><input type="text" class="acct_nm"></td>
+                        <td><input type="text" class="amt" value="{amt}"></td>
+                        <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <button class="btn btn-save" onclick="saveData()">DB에 지식 저장하기</button>
+    </div>
+
+    <div class="section">
+        <h2>📂 저장된 패턴 리스트</h2>
+        <table>
+            <thead><tr><th>ID</th><th>패턴명</th><th>유형</th><th>예시 문장</th><th>관리</th></tr></thead>
+            <tbody id="list-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    async function loadList() {
+        try {
+            const res = await fetch('/api/patterns');
+            const data = await res.json();
+            const html = data.map(item => `
+                <tr>
+                    <td>${item.id}</td>
+                    <td><b>${item.pattern_nm}</b></td>
+                    <td>${item.docty}</td>
+                    <td align="left">${item.example_tx}</td>
+                    <td><button class="btn btn-del" onclick="deleteItem(${item.id})">삭제</button></td>
+                </tr>
+            `).join('');
+            document.getElementById('list-body').innerHTML = html;
+        } catch(e) { console.error("로드 실패:", e); }
+    }
+
+    function addRow() {
+        const tr = `<tr>
+            <td><select class="side"><option value="D">차변</option><option value="C">대변</option></select></td>
+            <td><input type="text" class="acct"></td><td><input type="text" class="acct_nm"></td>
+            <td><input type="text" class="amt" value="{amt}"></td>
+            <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
+        </tr>`;
+        document.getElementById('journal-body').insertAdjacentHTML('beforeend', tr);
+    }
+
+    function removeRow(btn) {
+        const rows = document.querySelectorAll('#journal-body tr');
+        if(rows.length > 1) btn.closest('tr').remove();
+        else alert("최소 한 줄은 있어야 합니다.");
+    }
+
+    async function saveData() {
+        const rows = document.querySelectorAll('#journal-body tr');
+        const journal = Array.from(rows).map(r => ({
+            side: r.querySelector('.side').value,
+            acct: r.querySelector('.acct').value,
+            acct_nm: r.querySelector('.acct_nm').value,
+            amt: r.querySelector('.amt').value
+        }));
+
+        const payload = {
+            pattern_nm: document.getElementById('pattern_nm').value,
+            example_tx: document.getElementById('example_tx').value,
+            docty: document.getElementById('docty').value,
+            journal_json: journal
+        };
+
+        const res = await fetch('/api/pattern', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        alert(result.message);
+        location.reload();
+    }
+
+    async function deleteItem(id) {
+        if(!confirm("삭제하시겠습니까?")) return;
+        await fetch(`/api/pattern/${id}`, { method: 'DELETE' });
+        loadList();
+    }
+
+    window.onload = loadList;
+</script>
+</body>
+</html>
