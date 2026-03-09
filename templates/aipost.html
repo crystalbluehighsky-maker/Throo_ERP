@@ -30,6 +30,20 @@
             background-color: #f8f9fa !important;
             color: #adb5bd !important;
         }
+        /* 거래처 기본 계정 자동 입력 후 잠금 처리 (파란 계열 — AI 추론과 구분) */
+        .biz-gl-locked {
+            background-color: #eff6ff !important;
+            color: #1d4ed8 !important;
+            cursor: not-allowed !important;
+            pointer-events: none;
+            font-weight: 600;
+        }
+        .biz-gl-locked-btn {
+            background-color: #dbeafe !important;
+            color: #93c5fd !important;
+            cursor: not-allowed !important;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body class="p-6">
@@ -503,12 +517,20 @@
         }
         
         function selectItem(c, n, t) {
-            if(currentSearchType === 'bizpt') { document.getElementById('h-bizptcd').value = c; document.getElementById('h-bizname').value = n; document.getElementById('bizpt-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); }
+            if(currentSearchType === 'bizpt') {
+                document.getElementById('h-bizptcd').value = c;
+                document.getElementById('h-bizname').value = n;
+                document.getElementById('bizpt-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
+                // 거래처 선택 완료 → 기본 AR/AP 계정 자동 매핑
+                applyBizptGl(c);
+            }
             else if(currentSearchType === 'pctr') { document.getElementById('h-pctrcd').value = c; document.getElementById('h-pctrnm').value = n; document.getElementById('pctr-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); syncPctrToLines(); }
             else if(currentSearchType === 'anakey') { document.getElementById('h-anakey').value = c; document.getElementById('h-ananm').value = n; document.getElementById('anakey-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); syncAnaToLines(); }
             else if(currentSearchType === 'taxkey') { document.getElementById('h-taxinfo').value = `${c} : ${n}`; document.getElementById('taxinfo-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); }
             else if(currentSearchType === 'glmaster' && activeLineBtn) {
                 const tr = activeLineBtn.closest('tr');
+                // 거래처 기본 계정으로 잠긴 라인은 GL 변경 불가
+                if (tr.dataset.glLocked === 'true') { closeModal(); return; }
                 tr.querySelector('.line-gl').value = c; tr.querySelector('.line-glname').value = n;
                 tr.querySelector('.gl-container').classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500');
                 tr.querySelector('.gl-container').classList.add('bg-white');
@@ -522,6 +544,64 @@
 
         function syncPctrToLines() { const v = document.getElementById('h-pctrcd').value; document.querySelectorAll('.line-pctr').forEach(i => i.value = v); }
         function syncAnaToLines() { const v = document.getElementById('h-anakey').value; document.querySelectorAll('.line-anakey').forEach(i => i.value = v); }
+
+        /** 거래처 선택 시 해당 doctyp의 AR(CI) 또는 AP(SI) 라인에 기본 계정 자동 매핑 후 필드 잠금 */
+        async function applyBizptGl(bizptcd) {
+            const doctyp = document.getElementById('h-doctyp').value;
+            // GL 자동매핑 대상: CI → AR 라인, SI → AP 라인 (GL 전표는 해당 없음)
+            const targetType = doctyp === 'CI' ? 'AR' : doctyp === 'SI' ? 'AP' : null;
+            if (!targetType) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/bizpt-gl?bizptcd=${encodeURIComponent(bizptcd)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+
+                const glCode = doctyp === 'CI' ? data.custgl : data.suppgl;
+                const glName = doctyp === 'CI' ? data.custgl_nm : data.suppgl_nm;
+                if (!glCode) return;  // 거래처에 기본 계정 미등록 시 스킵
+
+                document.querySelectorAll('#journal-tbody tr').forEach(tr => {
+                    if (tr.dataset.aiType !== targetType) return;
+
+                    const glInput    = tr.querySelector('.line-gl');
+                    const glNameInput = tr.querySelector('.line-glname');
+                    const glContainer = tr.querySelector('.gl-container');
+                    const searchBtn   = glContainer ? glContainer.querySelector('button') : null;
+
+                    // 기존 잠금 해제 후 재적용 (거래처 변경 시 덮어쓰기 허용)
+                    unlockGlField(tr);
+
+                    glInput.value     = glCode;
+                    glNameInput.value = glName;
+                    glContainer.classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500');
+                    glContainer.classList.add('bg-white');
+
+                    // 잠금 적용: 사용자가 임의 변경 불가
+                    glInput.classList.add('biz-gl-locked');
+                    glNameInput.classList.add('biz-gl-locked');
+                    if (searchBtn) {
+                        searchBtn.disabled = true;
+                        searchBtn.classList.add('biz-gl-locked-btn');
+                    }
+                    tr.dataset.glLocked = 'true';
+                });
+            } catch(e) {
+                console.warn('거래처 기본 계정 조회 실패:', e);
+            }
+        }
+
+        /** AR/AP 라인의 GL 잠금 해제 (거래처 변경 또는 라인 재렌더링 시 호출) */
+        function unlockGlField(tr) {
+            const glInput     = tr.querySelector('.line-gl');
+            const glNameInput = tr.querySelector('.line-glname');
+            const glContainer = tr.querySelector('.gl-container');
+            const searchBtn   = glContainer ? glContainer.querySelector('button') : null;
+            if (glInput)     glInput.classList.remove('biz-gl-locked');
+            if (glNameInput) glNameInput.classList.remove('biz-gl-locked');
+            if (searchBtn)   { searchBtn.disabled = false; searchBtn.classList.remove('biz-gl-locked-btn'); }
+            delete tr.dataset.glLocked;
+        }
 
         // 페이지 로드 시 DB 학습 패턴을 드롭다운에 추가
         loadDbPatterns();

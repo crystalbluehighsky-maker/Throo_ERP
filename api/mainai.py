@@ -184,6 +184,37 @@ async def get_std_patterns(db: Session = Depends(get_db), current_user: dict = D
     )).fetchall()
     return [{"id": r[0], "pattern_nm": r[1], "example_tx": r[2], "docty": r[3]} for r in rows]
 
+@router.get("/api/bizpt-gl")
+async def get_bizpt_default_gl(bizptcd: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """거래처 선택 시 기본 AR(custgl) / AP(suppgl) 계정 자동 조회"""
+    comcd = current_user["comcd"]
+    row = db.execute(
+        text("SELECT suppgl, custgl FROM t_cbizpt WHERE comcd=:c AND bizptcd=:b LIMIT 1"),
+        {"c": comcd, "b": bizptcd}
+    ).fetchone()
+    if not row:
+        return {"suppgl": "", "custgl": "", "suppgl_nm": "", "custgl_nm": ""}
+
+    suppgl = row[0] or ""
+    custgl = row[1] or ""
+    suppgl_nm, custgl_nm = "", ""
+
+    if suppgl:
+        r = db.execute(
+            text("SELECT glname1 FROM t_cglmst WHERE comcd=:c AND glmaster=:g LIMIT 1"),
+            {"c": comcd, "g": suppgl}
+        ).fetchone()
+        suppgl_nm = r[0] if r else ""
+
+    if custgl:
+        r = db.execute(
+            text("SELECT glname1 FROM t_cglmst WHERE comcd=:c AND glmaster=:g LIMIT 1"),
+            {"c": comcd, "g": custgl}
+        ).fetchone()
+        custgl_nm = r[0] if r else ""
+
+    return {"suppgl": suppgl, "custgl": custgl, "suppgl_nm": suppgl_nm, "custgl_nm": custgl_nm}
+
 @router.get("/api/search/{search_type}")
 async def master_search(search_type: str, q: str = "", db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     comcd = current_user["comcd"]
