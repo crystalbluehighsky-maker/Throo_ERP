@@ -333,9 +333,12 @@
             if (line.type) tr.dataset.aiType = line.type;
             if (line.type === 'TAX') tr.dataset.isTax = "Y";
 
-            const isDue = (line.gltype === 'C' || line.gltype === 'S');
+            // AR(입금예정일)·AP(지급만기일) 라인이거나 gltype이 채권·부채 유형인 경우 만기일 활성화
+            const isArApLine = (line.type === 'AR' || line.type === 'AP');
+            const isDue = isArApLine || (line.gltype === 'C' || line.gltype === 'S');
             const dueClass = isDue ? '' : 'disabled-input';
             const dueDisabled = isDue ? '' : 'disabled';
+            // AP 라인이면 라인별 duedt 우선, 없으면 전달된 dueDate(헤더) fallback
             const finalDueDate = isDue ? (line.duedt || dueDate || '') : '';
             
             const glBoxClass = line.glname ? 'bg-white' : 'bg-red-50 border-red-500 ring-1 ring-red-500';

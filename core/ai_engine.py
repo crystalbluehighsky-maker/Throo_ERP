@@ -1,5 +1,6 @@
 # ai_engine.py
 import os, json, anthropic, voyageai, re, asyncio
+from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import logging
@@ -161,8 +162,10 @@ class DabomHybridEngine:
         if not self.system_prompt_template:
             raise Exception("System prompt template not loaded.")
 
+        today_str = date.today().isoformat()   # 예: 2026-03-09
         prompt = (
             self.system_prompt_template
+            .replace("{{TODAY_DATE}}", today_str)
             .replace("{{RAW_TEXT}}", raw_text)
             .replace("{{PATTERN_GUIDE}}", f"{hint_section}\n{pattern_guide}")
         )
@@ -241,11 +244,13 @@ class DabomHybridEngine:
             # 💡 [핵심 추가] 라인별 금액 및 만기일 강제 주입
             for line in result_json.get("lines", []):
                 l_type = line.get("type", "")
-                
+
                 # 금액 분할 적용
                 if l_type in ["AR", "AP"]:
                     line["bizamt"], line["biztax"] = tot, 0
-                    line["duedt"] = due_date # AR/AP 라인에만 입금일(만기일) 주입
+                    # AR: 입금 예정일(입금 후 매출채권 정리 기준), AP: 지급 만기일
+                    # AI가 라인별 due_date를 계산해 넣었으면 우선 사용, 없으면 헤더 due_date fallback
+                    line["duedt"] = line.get("due_date", "") or due_date
                 elif l_type in ["REV", "EXP"]:
                     line["bizamt"], line["biztax"] = base, 0
                     line["duedt"] = ""
