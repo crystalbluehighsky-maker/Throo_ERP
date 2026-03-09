@@ -159,10 +159,12 @@
         </div>
     </div>
 
+    <!-- 서버에서 전달받은 예제 데이터: type="application/json"으로 분리하면 JS 린터가 Jinja2 문법을 파싱하지 않음 -->
+    <script type="application/json" id="examples-data">{{ examples | tojson | safe }}</script>
+
     <script>
         const API_BASE = "/api";
-        // 서버에서 전달받은 예제 데이터 주입
-        const examples = {{ examples | tojson | safe }};
+        const examples = JSON.parse(document.getElementById('examples-data').textContent);
         let isManualEdit = false, selectedRow = null, currentSearchType = "", activeLineBtn = null, currentPatternId = null; 
 
         function onExampleChange() {
