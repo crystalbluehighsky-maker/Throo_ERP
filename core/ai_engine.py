@@ -43,12 +43,58 @@ class DabomHybridEngine:
 
         pattern_id = None
         pattern_guide = ""
+        gl_fallback_matched = False  # GL 계정마스터 키워드 매칭 성공 여부
 
         if cand and (1 - cand.dist) > 0.55:
+            # Vector DB 패턴 매칭 성공
             pattern_id = cand.id
             raw_data = cand.journal_json
             parsed_pattern = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
             pattern_guide = f"### [필수 참조 패턴]\n{json.dumps(parsed_pattern, ensure_ascii=False)}"
+        else:
+            # Vector DB 매칭 실패: 원문 한글 키워드로 계정과목 마스터 검색
+            # 2~5글자 한글 토큰을 점진적으로 단축해 ILIKE 매칭 가능성을 높임
+            kw_set = set()
+            for word in re.findall(r'[가-힣]{2,}', raw_text):
+                for ln in range(min(len(word), 5), 1, -1):
+                    kw_set.add(word[:ln])
+            keywords = list(kw_set)[:12]
+
+            seen_gl = set()
+            gl_hints = []
+
+            # 1순위: 회사 사용 계정 t_cglmst (comcd 필터)
+            for kw in keywords:
+                rows = db.execute(
+                    text("SELECT glmaster, glname1, gltype FROM t_cglmst WHERE comcd=:c AND glname1 ILIKE :k LIMIT 3"),
+                    {"c": comcd, "k": f"%{kw}%"}
+                ).fetchall()
+                for row in rows:
+                    if row[0] not in seen_gl:
+                        seen_gl.add(row[0])
+                        gl_hints.append({"src": "cgl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
+                if len(gl_hints) >= 8:
+                    break
+
+            # 2순위: t_cglmst 미검색 시 전체 표준 계정 t_nglmst (comcd 조건 없음)
+            if not gl_hints:
+                for kw in keywords:
+                    rows = db.execute(
+                        text("SELECT glmaster, glname1, gltype FROM t_nglmst WHERE glname1 ILIKE :k LIMIT 3"),
+                        {"k": f"%{kw}%"}
+                    ).fetchall()
+                    for row in rows:
+                        if row[0] not in seen_gl:
+                            seen_gl.add(row[0])
+                            gl_hints.append({"src": "ngl", "glmaster": row[0], "glname1": row[1], "gltype": row[2]})
+                    if len(gl_hints) >= 8:
+                        break
+
+            if gl_hints:
+                src_label = "회사계정(t_cglmst)" if gl_hints[0]["src"] == "cgl" else "표준계정(t_nglmst)"
+                pattern_guide = f"### [계정과목 마스터 참조 후보({src_label}) - 아래 중 적절한 계정 사용]\n{json.dumps(gl_hints, ensure_ascii=False)}"
+                gl_fallback_matched = True
+                logger.info(f"GL fallback({src_label}) matched {len(gl_hints)} accounts for: '{raw_text[:30]}'")
 
         # 2. AI 지시문
         if not self.system_prompt_template:
@@ -87,8 +133,8 @@ class DabomHybridEngine:
             
             result_json = json.loads(re.sub(r',\s*([\]}])', r'\1', resp_text), strict=False)
             result_json['pattern_id'] = pattern_id
-            # pattern_id가 있으면 DB 벡터 검색으로 참조한 것, 없으면 AI가 순수 생성한 것
-            result_json['source'] = "DB" if pattern_id else "AI"
+            # Vector DB 패턴 매칭 또는 GL 계정마스터 fallback 검색 성공 시 "DB", 순수 AI 생성 시 "AI"
+            result_json['source'] = "DB" if (pattern_id or gl_fallback_matched) else "AI"
             
             # 💡 [핵심 추가] 파이썬 백엔드 수학적 금액 강제 계산 로직
             tot = float(result_json.get("total_amount", 0))
