@@ -188,13 +188,20 @@ class DabomHybridEngine:
                 else:
                     line["duedt"] = ""
 
-                # GL 계정명 무결성 검증
+                # GL 계정명 무결성 검증: DB에 없는 AI 임의 추측 코드는 빈칸으로 초기화해 사용자 선택 유도
                 glcd = line.get("glmaster", "")
                 line["glname"], line["gltype"] = "", ""
                 if glcd:
-                    row = db.execute(text("SELECT glname1, gltype FROM t_cglmst WHERE comcd=:c AND glmaster=:g LIMIT 1"), {"c": comcd, "g": glcd}).fetchone()
-                    if row: 
+                    row = db.execute(
+                        text("SELECT glname1, gltype FROM t_cglmst WHERE comcd=:c AND glmaster=:g LIMIT 1"),
+                        {"c": comcd, "g": glcd}
+                    ).fetchone()
+                    if row:
                         line["glname"], line["gltype"] = row[0], row[1]
+                    else:
+                        # DB에 없는 코드 → AI 임의 추측 방지: 코드 초기화, 계정명으로 검색 필요 안내
+                        line["glmaster"] = ""
+                        line["glname"] = "(계정 검색 필요)"
 
             return result_json
         except Exception as e:

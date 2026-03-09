@@ -13,8 +13,23 @@
         .disabled-input { background-color: #f8fafc !important; cursor: not-allowed !important; color: #94a3b8 !important; pointer-events: none; }
         .modified-highlight { background-color: #fff1f2 !important; border: 2px solid #f43f5e !important; }
         /* GL 전표 유형 선택 시 비활성화 필드 스타일 (라벨 포함 전체 그룹) */
-        .gl-disabled { opacity: 0.35; pointer-events: none; }
+        .gl-disabled { position: relative; }
+        /* ::after 오버레이: 클릭 차단 + cursor:not-allowed + 회색 배경을 동시에 처리
+           pointer-events:none 만으로는 브라우저가 cursor 스타일을 표시하지 않으므로 이 방식 사용 */
+        .gl-disabled::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-color: rgba(248, 249, 250, 0.82);
+            cursor: not-allowed;
+            z-index: 10;
+            border-radius: 8px;
+        }
         .gl-disabled label { color: #94a3b8 !important; }
+        .gl-disabled input, .gl-disabled select, .gl-disabled button {
+            background-color: #f8f9fa !important;
+            color: #adb5bd !important;
+        }
     </style>
 </head>
 <body class="p-6">
