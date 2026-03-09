@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Dabom - 메인 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg-sidebar: #1e293b;
+            --text-sidebar: #cbd5e1;
+            --bg-main: #f8fafc;
+        }
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Pretendard', sans-serif; overflow: hidden; }
+        
+        /* 좌측 사이드바 */
+        .sidebar {
+            width: 260px; background-color: var(--bg-sidebar); color: var(--text-sidebar);
+            display: flex; flex-direction: column;
+        }
+        .sidebar-header { padding: 20px; font-size: 20px; font-weight: bold; color: white; border-bottom: 1px solid #334155; }
+        
+        .menu-container { flex-grow: 1; overflow-y: auto; padding-top: 10px; }
+        
+        /* 스크롤바 디자인 */
+        .menu-container::-webkit-scrollbar { width: 6px; }
+        .menu-container::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+
+        .menu-item {
+            padding: 12px 20px; cursor: pointer; font-weight: 500;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .menu-item:hover { background-color: #334155; color: white; }
+        
+        /* 서브 메뉴 (기본 숨김) */
+        .sub-menu { display: none; background-color: #0f172a; padding: 5px 0; }
+        .sub-menu a {
+            display: block; padding: 10px 20px 10px 40px; color: #94a3b8;
+            text-decoration: none; font-size: 14px; transition: color 0.2s;
+        }
+        .sub-menu a:hover { color: white; background-color: #1e293b; }
+        .sub-menu a.active { color: var(--primary); font-weight: bold; }
+        
+        /* 우측 메인 영역 */
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; background-color: var(--bg-main); }
+        
+        /* 상단 헤더 */
+        .top-header {
+            height: 60px; background-color: white; border-bottom: 1px solid #e2e8f0;
+            display: flex; justify-content: flex-end; align-items: center; padding: 0 30px;
+        }
+        .user-profile { display: flex; align-items: center; gap: 15px; font-size: 14px; color: #475569; }
+        .user-profile span.comcd-badge { background-color: #eff6ff; color: var(--primary); padding: 4px 10px; border-radius: 20px; font-weight: bold; }
+        
+        /* 작업 영역 (iframe) */
+        .workspace { flex-grow: 1; padding: 20px; overflow: hidden; }
+        .workspace iframe { width: 100%; height: 100%; border: none; border-radius: 8px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="sidebar-header">Dabom ERP</div>
+        <div class="menu-container">
+            
+            <div class="menu-item" onclick="toggleMenu('master')">마스터관리 <span>▼</span></div>
+            <div class="sub-menu" id="menu-master">
+                <a href="#" onclick="loadPage('권한관리')">권한관리</a>
+                <a href="#" onclick="loadPage('회사정보관리')">회사정보관리</a>
+                <a href="#" onclick="loadPage('사용자관리')">사용자관리</a>
+                <a href="#" onclick="loadPage('GL계정관리')">GL계정관리</a>
+                <a href="#" onclick="loadPage('거래처관리')">거래처관리</a>
+                <a href="#" onclick="loadPage('손익부서관리')">손익부서관리</a>
+                <a href="#" onclick="loadPage('관리항목관리')">관리항목관리</a>
+                <a href="#" onclick="loadPage('예산관리')">예산관리</a>
+                <a href="#" onclick="loadPage('세금코드관리')">세금코드관리</a>
+                <a href="#" onclick="loadPage('환율관리')">환율관리</a>
+            </div>
+
+            <div class="menu-item" onclick="toggleMenu('trans')">거래관리 <span>▼</span></div>
+            <div class="sub-menu" id="menu-trans" style="display: block;"> 
+                <a href="#" class="active" onclick="loadPage('/aipost.html')">AI전표입력</a>
+                <a href="#" onclick="loadPage('전표조회')">전표조회</a>
+                <a href="#" onclick="loadPage('지급관리(AP)')">지급관리(AP)</a>
+                <a href="#" onclick="loadPage('입급관리(AR)')">입급관리(AR)</a>
+            </div>
+
+            <div class="menu-item" onclick="toggleMenu('closing')">결산관리 <span>▼</span></div>
+            <div class="sub-menu" id="menu-closing">
+                <a href="#" onclick="loadPage('감가상각')">감가상각</a>
+                <a href="#" onclick="loadPage('환평가')">환평가</a>
+            </div>
+
+            <div class="menu-item" onclick="toggleMenu('report')">리포트관리 <span>▼</span></div>
+            <div class="sub-menu" id="menu-report">
+                <a href="#" onclick="loadPage('지급관련상세')">지급관련상세</a>
+                <a href="#" onclick="loadPage('입금관련상세')">입금관련상세</a>
+                <a href="#" onclick="loadPage('일반GL상세')">일반GL상세</a>
+                <a href="#" onclick="loadPage('재무상태표(BS)')">재무상태표(BS)</a>
+                <a href="#" onclick="loadPage('손익계산서')">손익계산서</a>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="top-header">
+            <div class="user-profile" id="userInfoDisplay">
+                <span class="comcd-badge">{{ user_info.comcd }}</span>
+                <span><b>{{ user_info.username }}</b> 님</span>
+                <span style="color: #94a3b8;">|</span>
+                <span>부서: {{ user_info.deptcd }}</span>
+                <span>사번: {{ user_info.empno }}</span>
+            </div>
+        </div>
+
+        <div class="workspace">
+            <iframe id="contentFrame" src="/aipost.html"></iframe>
+        </div>
+    </div>
+
+    <script>
+        // 1. 아코디언 메뉴 열고 닫기 기능
+        function toggleMenu(menuId) {
+            const menu = document.getElementById('menu-' + menuId);
+            if (menu.style.display === 'block') {
+                menu.style.display = 'none';
+            } else {
+                menu.style.display = 'block';
+            }
+        }
+
+        // 2. 화면 이동 (Iframe src 변경) 및 연결 준비
+        function loadPage(url) {
+            // 실제 연결된 HTML 파일이 '/aipost.html' 인 경우만 iframe 변경
+            if(url === '/aipost.html') {
+                document.getElementById('contentFrame').src = url;
+            } else {
+                // 향후 개발될 메뉴들은 우선 알림창으로 표시
+                alert("[" + url + "] 메뉴는 현재 개발/연결 준비 중입니다.");
+                return;
+            }
+            
+            // 클릭한 메뉴만 활성화(파란색) 처리
+            document.querySelectorAll('.sub-menu a').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

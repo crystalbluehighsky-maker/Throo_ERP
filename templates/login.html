@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Dabom - 로그인</title>
+    <style>
+        body {
+            margin: 0; padding: 0;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; background-color: #f3f4f6;
+            font-family: 'Pretendard', sans-serif;
+        }
+        .login-container {
+            background: #ffffff; padding: 40px; border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            width: 100%; max-width: 360px; text-align: center;
+        }
+        .login-container h1 {
+            color: #1f2937; margin-bottom: 8px; font-size: 24px;
+        }
+        .login-container p {
+            color: #6b7280; font-size: 14px; margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px; text-align: left;
+        }
+        .input-group label {
+            display: block; margin-bottom: 6px; font-size: 13px; color: #374151; font-weight: 600;
+        }
+        .input-group input {
+            width: 100%; padding: 12px; border: 1px solid #d1d5db;
+            border-radius: 8px; box-sizing: border-box; font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        .input-group input:focus {
+            outline: none; border-color: #2563eb;
+        }
+        .login-btn {
+            width: 100%; padding: 12px; background-color: #2563eb;
+            color: white; border: none; border-radius: 8px;
+            font-size: 16px; font-weight: 600; cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .login-btn:hover { background-color: #1d4ed8; }
+    </style>
+</head>
+<body>
+
+<div class="login-container">
+    <h1>Dabom</h1>
+    <p>AI 하이브리드 회계 시스템</p>
+    
+    <form action="/api/login" method="POST">
+        <div class="input-group">
+            <label for="userid">아이디</label>
+            <input type="text" id="userid" name="userid" placeholder="user01" required>
+        </div>
+        <div class="input-group">
+            <label for="password">비밀번호 (테스트 중 생략 가능)</label>
+            <input type="password" id="password" name="password" placeholder="••••••••">
+        </div>
+        <button type="submit" class="login-btn">로그인</button>
+    </form>
+</div>
+
+</body>
+</html>
