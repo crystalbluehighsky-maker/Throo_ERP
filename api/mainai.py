@@ -57,7 +57,9 @@ async def parse_natural_language(req: AiParseRequest, db: Session = Depends(get_
 async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     try:
         comcd = current_user["comcd"]
-        fisyr = req.pstdate[:4]
+        # int 변환 필수: t_cdocnum.fisyr 컬럼 타입이 numeric(4)이므로
+        # psycopg2가 문자열 파라미터를 varchar로 바인딩하면 타입 불일치로 0행 반환됨
+        fisyr = int(req.pstdate[:4])
         month_str = f"{int(req.pstdate[5:7]):02d}"
         
         # 임베딩 생성 (학습 데이터용)
@@ -68,13 +70,33 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
         sys_enttm = now.strftime("%H:%M:%S")
 
         with db.begin():
-            # 1. 채번 (t_cdocnum)
+            # 1. 채번 (t_cdocnum) ─ 존재 확인 → tonum 범위 확인 → maxnum 증가
+            docnum = db.execute(text(
+                "SELECT maxnum, tonum FROM t_cdocnum WHERE comcd=:c AND fisyr=:f AND doctype=:d"
+            ), {"c": comcd, "f": fisyr, "d": req.doctyp}).fetchone()
+
+            if not docnum:
+                raise Exception(
+                    f"해당 전표유형의 전표번호가 없습니다. 관리자에게 확인해주세요. "
+                    f"(전표유형: {req.doctyp}, 회계연도: {fisyr})"
+                )
+            if docnum[0] >= docnum[1]:
+                raise Exception(
+                    f"채번 번호가 소진되었습니다. 관리자에게 확인해주세요. "
+                    f"(전표유형: {req.doctyp}, 최대번호: {docnum[1]})"
+                )
+
             res = db.execute(text("""
-                UPDATE t_cdocnum SET maxnum = maxnum + 1 
-                WHERE comcd=:c AND fisyr=:f AND doctype=:d RETURNING maxnum
+                UPDATE t_cdocnum SET maxnum = maxnum + 1
+                WHERE comcd=:c AND fisyr=:f AND doctype=:d AND maxnum < tonum
+                RETURNING maxnum
             """), {"c": comcd, "f": fisyr, "d": req.doctyp}).fetchone()
-            
-            if not res: raise Exception("채번 설정 누락")
+
+            if not res:
+                raise Exception(
+                    f"채번 업데이트에 실패했습니다. 관리자에게 확인해주세요. "
+                    f"(전표유형: {req.doctyp}, 회계연도: {fisyr})"
+                )
             slipno = str(int(res[0]))
 
             # 2. 헤더 저장 (t_lhead)
