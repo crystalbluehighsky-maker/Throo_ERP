@@ -33,4 +33,5 @@ class JournalPostRequest(BaseModel):
     taxcode: str
     modify_reason: str
     raw_text: str
+    match_score: Optional[float] = None   # pg_trgm 유사도 최고점 (t_ai_log 업데이트용)
     lines: List[JournalLine]

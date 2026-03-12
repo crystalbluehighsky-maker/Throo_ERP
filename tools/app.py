@@ -65,18 +65,77 @@ def create_pattern():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/api/pattern/<int:id>', methods=['DELETE'])
-def delete_pattern(id):
+@app.route('/api/pattern/<int:id>', methods=['PUT'])
+def update_pattern(id):
+    """
+    패턴 수정 — ID를 유지하는 UPDATE 방식.
+    [참조 분석 결과] t_v_std_pattern.id는 어떤 테이블에도 FK로 저장되지 않지만,
+    mainai.py의 pattern_id 논리 참조 및 향후 확장 안전성을 위해 UPDATE를 채택.
+    - example_tx 변경 시: Voyage AI 임베딩 재발급 후 embedding 컬럼도 업데이트
+    - example_tx 미변경 시: 기존 임베딩 유지 (불필요한 API 호출 절감)
+    """
+    data = request.json
+    conn = None
     try:
         conn = psycopg2.connect(**db_params)
         cur = conn.cursor()
-        cur.execute("DELETE FROM t_v_std_pattern WHERE id=%s", (id,))
-        conn.commit()
+
+        # 기존 example_tx 조회 → 변경 여부로 벡터 재발급 필요성 판단
+        cur.execute("SELECT example_tx FROM t_v_std_pattern WHERE id=%s", (id,))
+        old = cur.fetchone()
+        if not old:
+            return jsonify({"status": "error", "message": f"ID {id} 패턴을 찾을 수 없습니다."}), 404
+
+        new_tx    = data['example_tx'].strip()
+        tx_changed = (new_tx != (old[0] or '').strip())
+
+        with conn:  # 트랜잭션: 예외 발생 시 자동 rollback
+            if tx_changed:
+                # 예시 문장 변경 → 벡터 재발급
+                embedding = get_embedding(new_tx)
+                cur.execute(
+                    """UPDATE t_v_std_pattern
+                       SET pattern_nm=%s, example_tx=%s, embedding=%s, docty=%s, journal_json=%s
+                       WHERE id=%s""",
+                    (data['pattern_nm'], new_tx, embedding, data['docty'],
+                     Json(data['journal_json']), id)
+                )
+                msg = f"패턴 ID {id} 수정 완료 ✓ (벡터 재발급)"
+            else:
+                # 예시 문장 미변경 → 임베딩 그대로 유지
+                cur.execute(
+                    """UPDATE t_v_std_pattern
+                       SET pattern_nm=%s, docty=%s, journal_json=%s
+                       WHERE id=%s""",
+                    (data['pattern_nm'], data['docty'], Json(data['journal_json']), id)
+                )
+                msg = f"패턴 ID {id} 수정 완료 ✓ (벡터 유지)"
+
         cur.close()
-        conn.close()
+        return jsonify({"status": "success", "message": msg})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if conn:
+            try: conn.close()
+            except: pass
+
+@app.route('/api/pattern/<int:id>', methods=['DELETE'])
+def delete_pattern(id):
+    conn = None
+    try:
+        conn = psycopg2.connect(**db_params)
+        cur = conn.cursor()
+        with conn:
+            cur.execute("DELETE FROM t_v_std_pattern WHERE id=%s", (id,))
+        cur.close()
         return jsonify({"status": "success", "message": "삭제 완료"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if conn:
+            try: conn.close()
+            except: pass
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
