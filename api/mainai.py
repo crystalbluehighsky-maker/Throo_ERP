@@ -6,19 +6,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import AiParseRequest, JournalPostRequest
-from core.ai_engine import DabomHybridEngine
+from core.ai_engine import ThrooHybridEngine
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("DaBom_AI_System")
+logger = logging.getLogger("Throo_AI_System")
 
 router = APIRouter()
-SECRET_KEY = "dabom_super_secret_key_for_jwt"
+SECRET_KEY = "throo_super_secret_key_for_jwt"
 ALGORITHM = "HS256"
 
-engine = DabomHybridEngine()
+engine = ThrooHybridEngine()
 
 def get_current_user(request: Request):
-    token = request.cookies.get("dabom_session")
+    token = request.cookies.get("throo_session")
     if not token: raise HTTPException(status_code=401)
     try: 
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -29,18 +29,21 @@ def get_current_user(request: Request):
 async def parse_natural_language(req: AiParseRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     try:
         comcd = current_user["comcd"]
-        result_json = await engine.generate_final_journal(db, comcd, req.natural_text)
+        result_json = await engine.analyze_and_generate_journal(db, comcd, req.natural_text)
         
         try:
             db.execute(text("""
-                INSERT INTO t_ai_log (comcd, user_id, raw_text, ai_json, status) 
-                VALUES (:c, :u, :r, :j, 'SUCCESS')
+                INSERT INTO t_ai_log (comcd, user_id, raw_text, ai_json, status, match_score)
+                VALUES (:c, :u, :r, :j, 'SUCCESS', :ms)
             """), {
-                "c": comcd, "u": current_user["userid"], "r": req.natural_text, 
-                "j": json.dumps(result_json, ensure_ascii=False)
+                "c":  comcd,
+                "u":  current_user["userid"],
+                "r":  req.natural_text,
+                "j":  json.dumps(result_json, ensure_ascii=False),
+                "ms": result_json.get("match_score"),   # 분석 시점 즉시 기록
             })
             db.commit()
-        except Exception: 
+        except Exception:
             db.rollback()
 
         return {
@@ -156,8 +159,17 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                 """), p)
             
             # 8. 사용자 학습 데이터 저장 (UPSERT)
+            # final_json 구조: {"lines": [...], "doctyp": "...", "modify_reason": "..."}
+            # - lines      : 분개 라인 목록 (RAG 패턴 매칭 시 참조)
+            # - modify_reason: 수정 사유 (특허 P26LX017 — 수정 의도 데이터 / 능동 학습 가중치 근거)
+            # - doctyp     : 전표 유형 (패턴 매칭 시 전표유형 추론 보조)
             if vec_str:
-                j = json.dumps([l.model_dump() for l in req.lines], ensure_ascii=False)
+                learn_data = {
+                    "lines":         [l.model_dump() for l in req.lines],
+                    "doctyp":        req.doctyp,
+                    "modify_reason": req.modify_reason or "",   # 수정 의도 — 빈 문자열은 AI 원본 사용
+                }
+                j = json.dumps(learn_data, ensure_ascii=False)
                 db.execute(text("""
                     INSERT INTO t_v_user_learn (comcd, usrnm, input_tx, embedding, final_json, hit_count, upd_date) 
                     VALUES (:c, :u, :tx, :v, :j, 1, NOW())
@@ -171,6 +183,27 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                     "j": j
                 })
         
+        # match_score가 전달된 경우 t_ai_log 최신 레코드에 반영
+        if req.match_score is not None:
+            try:
+                db.execute(text("""
+                    UPDATE t_ai_log SET match_score = :s
+                    WHERE id = (
+                        SELECT id FROM t_ai_log
+                        WHERE comcd = :c AND user_id = :u AND raw_text = :r AND status = 'SUCCESS'
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                """), {
+                    "s": req.match_score,
+                    "c": comcd,
+                    "u": current_user["userid"],
+                    "r": req.raw_text,
+                })
+                db.commit()
+            except Exception:
+                db.rollback()
+
         return {"status": "success", "slipno": slipno}
     except Exception as e:
         logger.error(f"Posting Error: {str(e)}")
@@ -219,14 +252,42 @@ async def get_bizpt_default_gl(bizptcd: str, db: Session = Depends(get_db), curr
 async def master_search(search_type: str, q: str = "", db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     comcd = current_user["comcd"]
     qf = f"%{q}%"
+
+    # glmaster: 계정과목 전체가 소규모 마스터이므로 검색어 없을 때 전체 조회,
+    #           검색어 있을 때도 LIMIT 500으로 여유 있게 반환 (LIMIT 50에서 변경)
+    if search_type == "glmaster":
+        if q.strip():
+            # 검색어 있음: 코드 또는 계정명 ILIKE 검색 (대소문자 무시)
+            sql = """
+                SELECT glmaster, glname1, gltype
+                FROM t_cglmst
+                WHERE comcd = :c
+                  AND use_yn = 'Y'
+                  AND (glmaster ILIKE :q OR glname1 ILIKE :q)
+                ORDER BY glmaster ASC
+                LIMIT 500
+            """
+        else:
+            # 검색어 없음: 전체 계정 조회 (LIMIT 없음 — 마스터 특성상 수백 건 이하)
+            sql = """
+                SELECT glmaster, glname1, gltype
+                FROM t_cglmst
+                WHERE comcd = :c
+                  AND use_yn = 'Y'
+                ORDER BY glmaster ASC
+            """
+        rows = db.execute(text(sql), {"c": comcd, "q": qf}).fetchall()
+        return [{"code": r[0], "name": r[1], "type": r[2]} for r in rows]
+
+    # 나머지 마스터: 기존 LIMIT 100으로 상향 (bizpt 등은 대규모 가능)
     sql_map = {
-        "bizpt": "SELECT bizptcd, bizname1, '' FROM t_cbizpt WHERE comcd = :c AND (bizptcd ILIKE :q OR bizname1 ILIKE :q) ORDER BY bizname1 LIMIT 50", 
-        "taxkey": "SELECT taxcd, taxnm, '' FROM t_ctxkey WHERE comcd = :c AND (taxcd ILIKE :q OR taxnm ILIKE :q) ORDER BY taxcd LIMIT 50", 
-        "pctr": "SELECT pctrcd, prcrnm, '' FROM t_cprocos WHERE comcd = :c AND (pctrcd ILIKE :q OR prcrnm ILIKE :q) ORDER BY prcrnm LIMIT 50", 
-        "anakey": "SELECT manaky, mananm, '' FROM t_mbkey WHERE comcd = :c AND (manaky ILIKE :q OR mananm ILIKE :q) ORDER BY mananm LIMIT 50", 
-        "glmaster": "SELECT glmaster, glname1, gltype FROM t_cglmst WHERE comcd = :c AND (glmaster ILIKE :q OR glname1 ILIKE :q) ORDER BY glmaster LIMIT 50"
+        "bizpt":   "SELECT bizptcd, bizname1, '' FROM t_cbizpt  WHERE comcd = :c AND (bizptcd  ILIKE :q OR bizname1 ILIKE :q) ORDER BY bizname1 LIMIT 100",
+        "taxkey":  "SELECT taxcd,   taxnm,   '' FROM t_ctxkey   WHERE comcd = :c AND (taxcd    ILIKE :q OR taxnm    ILIKE :q) ORDER BY taxcd    LIMIT 100",
+        "pctr":    "SELECT pctrcd,  prcrnm,  '' FROM t_cprocos  WHERE comcd = :c AND (pctrcd   ILIKE :q OR prcrnm   ILIKE :q) ORDER BY prcrnm   LIMIT 100",
+        "anakey":  "SELECT manaky,  mananm,  '' FROM t_mbkey    WHERE comcd = :c AND (manaky   ILIKE :q OR mananm   ILIKE :q) ORDER BY mananm   LIMIT 100",
     }
     query = sql_map.get(search_type)
-    if not query: return []
+    if not query:
+        return []
     rows = db.execute(text(query), {"c": comcd, "q": qf}).fetchall()
     return [{"code": r[0], "name": r[1], "type": r[2]} for r in rows]

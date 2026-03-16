@@ -14,12 +14,12 @@ import jwt
 from datetime import datetime, timedelta
 from api.mainai import router as ai_router
 
-app = FastAPI(title="Dabom ERP AI System")
+app = FastAPI(title="Throo ERP AI System")
 
 # templates 폴더 절대 경로 설정
 templates_dir = os.path.join(BASE_DIR, "templates")
 templates = Jinja2Templates(directory=templates_dir)
-SECRET_KEY = "dabom_super_secret_key_for_jwt"
+SECRET_KEY = "throo_super_secret_key_for_jwt"
 ALGORITHM = "HS256"
 
 mock_db_t_cuserinfo = {"user01": {"userid": "user01", "comcd": "1091264100", "username": "홍길동"}}
@@ -36,12 +36,12 @@ async def login_process(userid: str = Form(...), password: str = Form("")):
     payload = {"userid": userid, "comcd": user_info["comcd"], "username": user_info["username"], "exp": datetime.utcnow() + timedelta(minutes=60)}
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     response = RedirectResponse(url=f"/{user_info['comcd']}/dashboard", status_code=303)
-    response.set_cookie(key="dabom_session", value=token, httponly=True)
+    response.set_cookie(key="throo_session", value=token, httponly=True)
     return response
 
 @app.get("/{comcd}/dashboard")
 async def show_dashboard(request: Request, comcd: str):
-    token = request.cookies.get("dabom_session")
+    token = request.cookies.get("throo_session")
     if not token: return RedirectResponse(url="/login")
     try:
         decoded = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

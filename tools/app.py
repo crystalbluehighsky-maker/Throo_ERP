@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from dotenv import load_dotenv
 
-# Dabom_RR 루트의 .env 파일을 읽어옵니다.
+# Throo_ERP 루트의 .env 파일을 읽어옵니다.
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)

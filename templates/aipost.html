@@ -421,12 +421,20 @@
             const currentAna = document.getElementById('h-anakey').value;
 
             lines.forEach((l) => {
-                let amt = total;
-                if (l.type === 'TAX') amt = v;
-                else if (l.type === 'REV' || (doctyp === 'SI' && l.type === 'EXP')) amt = s;
-                else if (l.type === 'EXP') amt = (hasTaxLine ? s : total);
-                
-                l._calcAmt = amt; 
+                // 1순위: 백엔드가 계산해 준 개별 금액(bizamt)이 있으면 그대로 사용
+                const serverAmt = parseFloat(l.bizamt) || 0;
+                let amt;
+                if (serverAmt > 0) {
+                    amt = serverAmt;
+                } else {
+                    // 2순위: 서버 금액이 없거나 0이면 기존 total 기반 안분 로직 사용
+                    amt = total;
+                    if (l.type === 'TAX') amt = v;
+                    else if (l.type === 'REV' || (doctyp === 'SI' && l.type === 'EXP')) amt = s;
+                    else if (l.type === 'EXP') amt = (hasTaxLine ? s : total);
+                }
+
+                l._calcAmt = amt;
                 if(!l.pctrcd) l.pctrcd = currentPctr;
                 if(!l.anakey) l.anakey = currentAna;
             });
@@ -455,14 +463,25 @@
 
         function createRow(no, line={}, amt=0, dueDate='', source='') {
             const tr = document.createElement('tr');
-            if (line.type) tr.dataset.aiType = line.type;
+            if (line.type)   tr.dataset.aiType = line.type;
             if (line.type === 'TAX') tr.dataset.isTax = "Y";
+            // gltype 저장: 만기일 Hard Block 검증에서 C/S 판별에 사용
+            if (line.gltype) tr.dataset.gltype = line.gltype;
 
-            // AR(입금예정일)·AP(지급만기일) 라인이거나 gltype이 채권·부채 유형인 경우 만기일 활성화
-            const isArApLine = (line.type === 'AR' || line.type === 'AP');
-            const isDue = isArApLine || (line.gltype === 'C' || line.gltype === 'S');
-            const dueClass = isDue ? '' : 'disabled-input';
+            // 만기일 활성화 조건:
+            // 1순위: line_field_control.due_date.status (REQUIRED_RED → 활성, DISABLED → 비활성)
+            // 2순위: due_date_enabled 플래그
+            // 3순위: gltype C/S 기준 (레거시 폴백)
+            const _dueLfc = (line.line_field_control || {}).due_date;
+            let isDue;
+            if (_dueLfc) {
+                isDue = (_dueLfc.status === 'REQUIRED_RED' || _dueLfc.status === 'EDITABLE');
+            } else {
+                isDue = (line.due_date_enabled === true) || (line.gltype === 'C' || line.gltype === 'S');
+            }
+            const dueClass    = isDue ? '' : 'disabled-input';
             const dueDisabled = isDue ? '' : 'disabled';
+            const dueTitle    = _dueLfc ? (_dueLfc.msg || '') : '';
             const finalDueDate = isDue ? (line.duedt || dueDate || '') : '';
 
             // Intent Override 라인: 행 전체 황색 하이라이트 (계정이 변경되었음을 시각적으로 안내)
@@ -471,14 +490,25 @@
                 tr.style.borderLeft = '3px solid #fbbf24';  // amber-400
             }
 
-            // 거래처 마스터 계정 자동매핑 라인 잠금 (수동 선택과 동일한 biz-gl-locked 처리)
-            const isBizGlLocked = !!line.biz_gl_locked;
-            if (isBizGlLocked) tr.dataset.glLocked = 'true';
-            const glInputClass  = isBizGlLocked ? 'biz-gl-locked' : '';
-            const glNameClass   = isBizGlLocked ? 'biz-gl-locked' : 'text-slate-500';
-            const glBtnClass    = isBizGlLocked ? 'biz-gl-locked-btn' : 'bg-slate-50 hover:bg-slate-200 cursor-pointer';
-            const glBtnDisabled = isBizGlLocked ? 'disabled' : '';
-            
+            // 계정코드 잠금 여부 결정:
+            // 1순위: line_field_control.account_code.status === 'DISABLED' (C/S 오픈아이템 무결성 보호)
+            // 2순위: biz_gl_locked (거래처 기본 계정 자동매핑)
+            const _acctLfc       = (line.line_field_control || {}).account_code;
+            const isOpenItemLock = _acctLfc && _acctLfc.status === 'DISABLED';
+            const isBizGlLocked  = !!line.biz_gl_locked;
+            const isGlLocked     = isOpenItemLock || isBizGlLocked;
+
+            if (isGlLocked) tr.dataset.glLocked = 'true';
+            if (isOpenItemLock) {
+                // 오픈아이템 잠금: 빨간 테두리 없이 회색으로 잠금 표시
+                tr.dataset.openItemLocked = 'true';
+            }
+            const glInputClass  = isGlLocked ? 'biz-gl-locked' : '';
+            const glNameClass   = isGlLocked ? 'biz-gl-locked' : 'text-slate-500';
+            const glBtnClass    = isGlLocked ? 'biz-gl-locked-btn' : 'bg-slate-50 hover:bg-slate-200 cursor-pointer';
+            const glBtnDisabled = isGlLocked ? 'disabled' : '';
+            const glBtnTitle    = isOpenItemLock ? (_acctLfc.msg || '계정 변경 불가') : '';
+
             const glBoxClass = line.glname ? 'bg-white' : 'bg-red-50 border-red-500 ring-1 ring-red-500';
 
             // 출처 배지: 라인 수준 source 우선 → 헤더 수준 source 폴백
@@ -513,7 +543,7 @@
                 <td class="p-2">
                     <div class="flex border rounded overflow-hidden ${glBoxClass} gl-container">
                         <input type="text" class="cell-input font-mono line-gl w-full border-none ${glInputClass}" value="${line.glmaster||''}" readonly>
-                        <button onclick="openSearch('glmaster', this)" class="px-2 border-l text-slate-500 ${glBtnClass}" ${glBtnDisabled}><i class="fa-solid fa-magnifying-glass"></i></button>
+                        <button onclick="openSearch('glmaster', this)" class="px-2 border-l text-slate-500 ${glBtnClass}" ${glBtnDisabled} title="${glBtnTitle}"><i class="fa-solid fa-magnifying-glass"></i></button>
                     </div>
                 </td>
                 <td class="p-2"><input type="text" class="cell-input line-glname ${glNameClass}" value="${line.glname||''}" readonly placeholder="계정 검색 필요"></td>
@@ -521,7 +551,7 @@
                 <td class="p-3 text-right font-bold loc-amt-display text-slate-500">0</td>
                 <td class="p-2"><input type="text" class="cell-input line-pctr" value="${line.pctrcd||''}" oninput="markEdit()"></td>
                 <td class="p-2"><input type="text" class="cell-input line-anakey" value="${line.anakey||''}" oninput="markEdit()"></td>
-                <td class="p-2"><input type="date" class="cell-input line-duedt ${dueClass} cursor-pointer" value="${finalDueDate}" ${dueDisabled} onchange="markEdit()"></td>
+                <td class="p-2"><input type="date" class="cell-input line-duedt ${dueClass} cursor-pointer" value="${finalDueDate}" ${dueDisabled} title="${dueTitle}" onchange="markEdit()"></td>
                 <td class="p-2"><input type="text" class="cell-input line-text" value="${line.text||''}" oninput="markEdit()"></td>
                 <td class="p-2 text-center">${sourceBadge}</td>
             `;
@@ -630,6 +660,41 @@
             document.querySelectorAll('.line-glname').forEach(el => { if(!el.value) invalidGl = true; });
             if(invalidGl) return alert("빨간색으로 표시된 계정코드를 검색하여 정확히 입력해주세요.");
 
+            // ── [Hard Block] 오픈아이템 라인 만기일자 필수 검증 ─────────────
+            // gltype이 C(고객) 또는 S(공급업체)인 라인은 만기일(duedt)이 반드시 있어야 함
+            const rows = Array.from(document.querySelectorAll('#journal-tbody tr'));
+            for (const tr of rows) {
+                const gltype = tr.dataset.gltype || '';
+                if (gltype === 'C' || gltype === 'S') {
+                    const duedtVal = tr.querySelector('.line-duedt')?.value || '';
+                    if (!duedtVal) {
+                        const glname = tr.querySelector('.line-glname')?.value || '오픈아이템';
+                        alert(`[필수] "${glname}" 계정은 오픈아이템 계정입니다.\n만기일자를 반드시 입력해주세요.`);
+                        tr.querySelector('.line-duedt')?.focus();
+                        return;
+                    }
+                }
+            }
+
+            // ── [Soft Warning] CI 전표 세금계산서 발행일 미입력 확인 ─────────
+            const doctyp     = document.getElementById('h-doctyp').value;
+            const taxInvDate = document.getElementById('h-taxdate').value;
+            if (doctyp === 'CI' && !taxInvDate) {
+                // 부가세 라인이 존재하는지 확인
+                const hasTaxLine = rows.some(tr => tr.dataset.isTax === 'Y' &&
+                    (parseFloat(tr.querySelector('.amt-input')?.value?.replace(/,/g,'')) || 0) > 0);
+                if (hasTaxLine) {
+                    const proceed = confirm(
+                        "세금계산서 발행일이 빠져있는데 전표저장하시겠습니까?\n\n" +
+                        "[예] 저장 진행  /  [취소] 입력 후 저장"
+                    );
+                    if (!proceed) {
+                        document.getElementById('h-taxdate').focus();
+                        return;
+                    }
+                }
+            }
+
             const pstdateEl = document.getElementById('h-pstdate').value;
             
             // 💡 수정: payload 키 값을 trandt로 변경
@@ -659,61 +724,134 @@
             } catch (err) { alert(`오류 발생: ${err.message}`); }
         }
 
+        /**
+         * applyFieldControl(elementId, fc, containerSuffix)
+         * 백엔드 field_control 객체를 받아 입력 필드에 CSS 상태를 적용하는 헬퍼.
+         * @param {string}  fieldId   - 대상 input/select 엘리먼트 ID
+         * @param {string}  containerId - 테두리를 입힐 컨테이너 엘리먼트 ID (없으면 null)
+         * @param {object}  fc        - { status, msg } — 백엔드 field_control 객체
+         */
+        function applyFieldControl(fieldId, containerId, fc) {
+            const el  = document.getElementById(fieldId);
+            const box = containerId ? document.getElementById(containerId) : null;
+            if (!fc) return;
+
+            // 모든 상태 클래스 초기화
+            const allCls = ['border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match','disabled-input'];
+            if (box) box.classList.remove(...allCls);
+            if (el)  { el.classList.remove(...allCls); el.disabled = false; }
+
+            switch (fc.status) {
+                case 'REQUIRED_RED':
+                    // 컨테이너가 있으면 컨테이너에, 없으면(단독 input이면) input 자체에 직접 빨간 테두리 적용
+                    if (box) { box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
+                    else if (el) { el.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
+                    if (el) el.title = fc.msg || '';
+                    break;
+                case 'WARNING_YELLOW':
+                    if (box) box.classList.add('fuzzy-match');
+                    else if (el) el.classList.add('fuzzy-match');
+                    if (el) el.title = fc.msg || '';
+                    break;
+                case 'DISABLED':
+                    if (el) { el.disabled = true; el.value = ''; el.classList.add('disabled-input'); el.title = fc.msg || ''; }
+                    break;
+                case 'USER_SELECT_REQUIRED':
+                    // 컨테이너와 input 양쪽 모두 빨간 테두리
+                    if (box) { box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
+                    if (el)  { el.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); el.value = ''; el.title = fc.msg || ''; }
+                    break;
+                // 'EDITABLE': 이미 초기화 완료 — 추가 처리 없음
+            }
+        }
+
         function fillHeader(e) {
             // 새 데이터로 덮어쓰기 전 하이라이트 전체 초기화 (잔상 제거)
             resetHeaderHighlights();
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('h-pstdate').value = e.date || today; 
             document.getElementById('h-transdt').value = e.date || today;
-            document.getElementById('h-doctyp').value = e.doctyp || 'GL';
+            document.getElementById('h-doctyp').value  = e.doctyp || 'GL';
             document.getElementById('h-docdate').value = e.date || today;
-            document.getElementById('h-text').value = e.text || document.getElementById('ai-input').value.substring(0, 50);
+            document.getElementById('h-text').value    = e.text || document.getElementById('ai-input').value.substring(0, 50);
 
             // doctyp 반영 후 GL 여부에 따라 관련 필드 활성화/비활성화
             onDoctypChange();
             const isGL = document.getElementById('h-doctyp').value === 'GL';
 
-            // GL이 아닐 때만 세금계산서 발행일 채움 (GL이면 onDoctypChange에서 이미 비워짐)
-            if (!isGL) document.getElementById('h-taxdate').value = e.tax_date || '';
+            // ── header_field_control 우선 처리 ─────────────────────────────
+            // 백엔드가 field_control 객체를 내려준 경우 이를 기반으로 UI 상태 결정.
+            // 없으면 기존 biz_match_status 등 레거시 필드로 폴백.
+            const hfc = e.header_field_control || {};
 
-            // 거래처: GL이 아닐 때만 빨간 테두리 및 값 처리
-            const bizptBox = document.getElementById('bizpt-container');
+            // ── 세금계산서 발행일 ────────────────────────────────────────────
+            // 1) 백엔드 tax_invoice_date 값을 먼저 채운다 (DISABLED면 applyFieldControl이 비움)
+            // 2) header_field_control.tax_invoice_date 상태를 적용한다
+            // 3) 결과: EDITABLE → 값 표시 / DISABLED → 비활성+값없음 / 없으면 빈값
             if (!isGL) {
-                bizptBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-                if (!e.bizptcd) {
-                    bizptBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
-                    document.getElementById('h-bizptcd').value = ''; document.getElementById('h-bizname').value = e.bizname || '';
-                } else {
-                    document.getElementById('h-bizptcd').value = e.bizptcd; document.getElementById('h-bizname').value = e.bizname;
-                    if (e.biz_match_status === 'FUZZY') bizptBox.classList.add('fuzzy-match');
+                const taxInvDate = e.tax_invoice_date || e.tax_date || '';
+                document.getElementById('h-taxdate').value = taxInvDate;
+                if (hfc.tax_invoice_date) {
+                    // applyFieldControl이 DISABLED면 값을 비우므로, 값을 먼저 채운 뒤 상태만 덮어씀
+                    const _hTaxEl = document.getElementById('h-taxdate');
+                    // 상태 클래스만 적용 (DISABLED가 아닌 경우 값 유지)
+                    applyFieldControl('h-taxdate', null, hfc.tax_invoice_date);
+                    // EDITABLE / REQUIRED_RED / USER_SELECT_REQUIRED → 값 복원
+                    if (hfc.tax_invoice_date.status !== 'DISABLED' && taxInvDate) {
+                        _hTaxEl.value = taxInvDate;
+                    }
                 }
             }
 
+            // ── 거래처 ──────────────────────────────────────────────────────
+            const bizptBox = document.getElementById('bizpt-container');
+            if (!isGL) {
+                bizptBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
+                document.getElementById('h-bizptcd').value = e.bizptcd || '';
+                document.getElementById('h-bizname').value = e.bizname || '';
+                if (hfc.bizptcd) {
+                    applyFieldControl('h-bizptcd', 'bizpt-container', hfc.bizptcd);
+                } else {
+                    // 레거시 폴백: biz_match_status 기반
+                    if (!e.bizptcd) {
+                        bizptBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
+                    } else if (e.biz_match_status === 'FUZZY') {
+                        bizptBox.classList.add('fuzzy-match');
+                    }
+                }
+            }
+
+            // ── 손익부서 ─────────────────────────────────────────────────────
             const pctrBox = document.getElementById('pctr-container');
             pctrBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-            if(!e.pctrcd) {
-                pctrBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
+            if (!e.pctrcd) {
+                pctrBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
                 document.getElementById('h-pctrcd').value = ''; document.getElementById('h-pctrnm').value = e.profit_center_name || '';
             } else {
                 document.getElementById('h-pctrcd').value = e.pctrcd; document.getElementById('h-pctrnm').value = e.pctrnm; syncPctrToLines();
                 if (e.pctr_match_status === 'FUZZY') pctrBox.classList.add('fuzzy-match');
             }
 
+            // ── 관리항목 ─────────────────────────────────────────────────────
             const anaBox = document.getElementById('anakey-container');
             anaBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-            if(!e.manaky) {
-                anaBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
+            if (!e.manaky) {
+                anaBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
                 document.getElementById('h-anakey').value = ''; document.getElementById('h-ananm').value = e.item_name || '';
             } else {
                 document.getElementById('h-anakey').value = e.manaky; document.getElementById('h-ananm').value = e.mananm; syncAnaToLines();
                 if (e.ana_match_status === 'FUZZY') anaBox.classList.add('fuzzy-match');
             }
 
-            // 세금코드: GL이 아닐 때만 빨간 테두리 및 값 처리
+            // ── 세금코드 ─────────────────────────────────────────────────────
             const taxBox = document.getElementById('taxinfo-container');
             if (!isGL) {
-                if (!e.taxcd) { taxBox.classList.add('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-taxinfo').value = ''; }
-                else { taxBox.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); document.getElementById('h-taxinfo').value = e.taxcd + ' : ' + e.taxnm; }
+                if (hfc.taxcode) {
+                    applyFieldControl('h-taxinfo', 'taxinfo-container', hfc.taxcode);
+                } else {
+                    if (!e.taxcd) { taxBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); document.getElementById('h-taxinfo').value = ''; }
+                    else { taxBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50'); document.getElementById('h-taxinfo').value = e.taxcd + ' : ' + e.taxnm; }
+                }
             }
         }
         

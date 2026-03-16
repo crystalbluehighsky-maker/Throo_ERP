@@ -7,7 +7,7 @@
         body { font-family: 'Malgun Gothic', sans-serif; background: #f0f2f5; padding: 20px; }
         .container { max-width: 1100px; margin: auto; display: flex; flex-direction: column; gap: 20px; }
         .section { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-        h2 { margin-top: 0; color: #2c3e50; border-left: 5px solid #6366f1; padding-left: 15px; }
+        h2 { margin-top: 0; color: #2c3e50; border-left: 5px solid #6366f1; padding-left: 15px; display: flex; align-items: center; gap: 10px; }
         .flex-row { display: flex; gap: 15px; margin-bottom: 15px; }
         label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9em; color: #4b5563; }
         input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
@@ -15,81 +15,289 @@
         th, td { border: 1px solid #eee; padding: 12px; text-align: center; font-size: 0.9em; }
         th { background: #f9fafb; color: #374151; }
         .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        .btn-save { background: #6366f1; color: white; width: 100%; font-size: 1.1em; margin-top: 20px; }
-        .btn-save:hover { background: #4f46e5; }
-        .btn-edit { background: #f59e0b; color: white; }
-        .btn-del { background: #ef4444; color: white; }
-        .btn-add { background: #10b981; color: white; float: right; margin-bottom: 10px; }
+        .btn-save  { background: #6366f1; color: white; font-size: 1.1em; }
+        .btn-save:hover  { background: #4f46e5; }
+        .btn-cancel { background: #6b7280; color: white; font-size: 1.1em; }
+        .btn-cancel:hover { background: #4b5563; }
+        .btn-edit  { background: #f59e0b; color: white; }
+        .btn-edit:hover  { background: #d97706; }
+        .btn-del   { background: #ef4444; color: white; }
+        .btn-del:hover   { background: #dc2626; }
+        .btn-add   { background: #10b981; color: white; float: right; margin-bottom: 10px; }
+
+        /* 수정 모드 표시 */
+        #form-section.edit-mode  { border: 2px solid #f59e0b; }
+        #form-section.edit-mode h2 { color: #92400e; border-left-color: #f59e0b; }
+        .edit-badge {
+            display: none;
+            background: #fef3c7; color: #92400e;
+            padding: 3px 10px; border-radius: 20px;
+            font-size: 0.8em; font-weight: bold; border: 1px solid #fcd34d;
+        }
+        #form-section.edit-mode .edit-badge { display: inline-block; }
+
+        /* 리스트 행 hover */
+        #list-body tr { transition: background 0.15s; }
+        #list-body tr:hover { background: #eff6ff; cursor: pointer; }
+        #list-body tr.active-row { background: #fef3c7 !important; }
+
+        .save-row { display: flex; gap: 10px; margin-top: 20px; }
+        .save-row button { flex: 1; padding: 14px; }
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="section">
-        <h2>📝 표준 분개 패턴 등록</h2>
+
+    <!-- ====== 등록/수정 폼 ====== -->
+    <div class="section" id="form-section">
+        <h2>
+            <span id="form-icon">📝</span>
+            <span id="form-title">표준 분개 패턴 등록</span>
+            <span class="edit-badge" id="edit-badge">✏️ 수정 모드</span>
+        </h2>
+
+        <!-- 수정 대상 ID 추적용 hidden input -->
         <input type="hidden" id="edit-id" value="">
+
         <div class="flex-row">
-            <div style="flex: 2;"><label>패턴명</label><input type="text" id="pattern_nm" placeholder="예: 비용지출_법인카드(GL)"></div>
-            <div style="flex: 1;"><label>유형</label>
+            <div style="flex: 2;">
+                <label>패턴명</label>
+                <input type="text" id="pattern_nm" placeholder="예: 비용지출_법인카드(GL)">
+            </div>
+            <div style="flex: 1;">
+                <label>유형</label>
                 <select id="docty">
                     <option value="GL">일반(GL)</option>
                     <option value="CI">매출(CI)</option>
                     <option value="SI">매입(SI)</option>
                 </select>
             </div>
-            <div style="flex: 1;"><label>통화</label><input type="text" id="currency" value="KRW"></div>
+            <div style="flex: 1;">
+                <label>통화</label>
+                <input type="text" id="currency" value="KRW">
+            </div>
         </div>
+
         <label>자연어 예시 (example_tx)</label>
         <textarea id="example_tx" rows="2" placeholder="AI가 학습할 문장을 입력하세요."></textarea>
 
         <div style="margin-top: 20px;">
             <button class="btn btn-add" onclick="addRow()">+ 줄 추가</button>
             <table id="jTable">
-                <thead><tr><th>차/대</th><th>계정코드</th><th>계정명</th><th>금액</th><th>관리</th></tr></thead>
+                <thead>
+                    <tr><th>차/대</th><th>계정코드</th><th>계정명</th><th>라인유형(type)</th><th>금액</th><th>관리</th></tr>
+                </thead>
                 <tbody id="journal-body">
                     <tr>
                         <td><select class="side"><option value="D">차변</option><option value="C">대변</option></select></td>
-                        <td><input type="text" class="acct"></td>
-                        <td><input type="text" class="acct_nm"></td>
+                        <td><input type="text" class="acct" placeholder="예: 253000"></td>
+                        <td><input type="text" class="acct_nm" placeholder="예: 미지급금"></td>
+                        <td><input type="text" class="line_type" placeholder="AR/AP/EXP/REV/TAX"></td>
                         <td><input type="text" class="amt" value="{amt}"></td>
                         <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
                     </tr>
                 </tbody>
             </table>
         </div>
-        <button class="btn btn-save" onclick="saveData()">DB에 지식 저장하기</button>
+
+        <div class="save-row">
+            <button class="btn btn-save" id="save-btn" onclick="saveData()">
+                💾 DB에 지식 저장하기
+            </button>
+            <button class="btn btn-cancel" id="cancel-btn" onclick="resetForm()" style="display:none;">
+                ✕ 취소 (신규 등록 모드로)
+            </button>
+        </div>
     </div>
 
+    <!-- ====== 저장된 패턴 리스트 ====== -->
     <div class="section">
         <h2>📂 저장된 패턴 리스트</h2>
+        <p style="font-size:0.85em; color:#6b7280; margin-top:-10px; margin-bottom:8px;">
+            💡 행을 클릭하면 상단 폼에 불러옵니다.
+        </p>
         <table>
-            <thead><tr><th>ID</th><th>패턴명</th><th>유형</th><th>예시 문장</th><th>관리</th></tr></thead>
+            <thead>
+                <tr><th>ID</th><th>패턴명</th><th>유형</th><th>예시 문장</th><th>관리</th></tr>
+            </thead>
             <tbody id="list-body"></tbody>
         </table>
     </div>
+
 </div>
 
 <script>
+    let currentActiveRow = null;   // 리스트에서 현재 선택된 행 추적
+    let patternDataMap   = {};     // { id: itemObject } — JSON-in-HTML 방식 대신 메모리 맵 사용
+
+    // ────────────────────────────────────────────
+    //  리스트 로드
+    //  ★ 핵심 수정: onclick에 JSON 직접 삽입 방식 제거
+    //    → patternDataMap에 전체 데이터를 보관하고 ID만 클릭 인자로 전달
+    //    (예시 문장의 따옴표·줄바꿈 등 특수문자로 onclick 파싱이 깨지던 문제 해결)
+    // ────────────────────────────────────────────
     async function loadList() {
         try {
-            const res = await fetch('/api/patterns');
+            const res  = await fetch('/api/patterns');
             const data = await res.json();
-            const html = data.map(item => `
-                <tr>
-                    <td>${item.id}</td>
-                    <td><b>${item.pattern_nm}</b></td>
-                    <td>${item.docty}</td>
-                    <td align="left">${item.example_tx}</td>
-                    <td><button class="btn btn-del" onclick="deleteItem(${item.id})">삭제</button></td>
+
+            // 전체 데이터를 메모리 맵에 저장
+            patternDataMap = {};
+            data.forEach(item => { patternDataMap[item.id] = item; });
+
+            const tbody = document.getElementById('list-body');
+            tbody.innerHTML = data.map(item => `
+                <tr data-id="${item.id}" style="cursor:pointer;">
+                    <td style="font-weight:bold; color:#6366f1;">${item.id}</td>
+                    <td><b>${escHtml(item.pattern_nm)}</b></td>
+                    <td>${escHtml(item.docty || '')}</td>
+                    <td align="left" style="max-width:400px; white-space:pre-wrap;">${escHtml(item.example_tx || '')}</td>
+                    <td><button class="btn btn-del" data-del-id="${item.id}">삭제</button></td>
                 </tr>
             `).join('');
-            document.getElementById('list-body').innerHTML = html;
+
+            // 이벤트 위임: 삭제 버튼과 행 클릭을 tbody 한 곳에서 처리
+            tbody.onclick = (e) => {
+                const delBtn = e.target.closest('[data-del-id]');
+                if (delBtn) {
+                    e.stopPropagation();
+                    deleteItem(parseInt(delBtn.dataset.delId));
+                    return;
+                }
+                const tr = e.target.closest('tr[data-id]');
+                if (tr) loadPatternForEdit(parseInt(tr.dataset.id));
+            };
         } catch(e) { console.error("로드 실패:", e); }
     }
 
+    // ────────────────────────────────────────────
+    //  리스트 클릭 → 폼에 바인딩 (수정 모드 진입)
+    //  ★ 핵심 수정: patternDataMap[id]로 데이터 조회 — 직렬화 없이 원본 JS 객체 사용
+    // ────────────────────────────────────────────
+    function loadPatternForEdit(id) {
+        const item = patternDataMap[id];
+        if (!item) { alert("패턴 데이터를 찾을 수 없습니다."); return; }
+
+        // hidden input에 ID 기록
+        document.getElementById('edit-id').value = item.id;
+
+        // 기본 필드 바인딩
+        document.getElementById('pattern_nm').value = item.pattern_nm || '';
+        document.getElementById('example_tx').value = item.example_tx || '';
+        document.getElementById('docty').value       = item.docty      || 'GL';
+
+        // 분개 라인 렌더링
+        const tbody = document.getElementById('journal-body');
+        tbody.innerHTML = '';
+
+        // journal_json은 DB에서 이미 JS 객체로 파싱됨 (JSONB → jsonify → fetch)
+        // 배열 직접 형식 [{ side,acct,… }] 또는 래핑 형식 { lines:[…] } 모두 처리
+        let raw   = item.journal_json;
+        // 문자열로 오는 경우(드물지만) 파싱
+        if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch(_) { raw = []; } }
+        let lines = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.lines) ? raw.lines : []);
+
+        if (lines.length === 0) {
+            addRow();  // 비어있으면 빈 행 하나 추가
+        } else {
+            lines.forEach(line => {
+                // 두 포맷 모두 지원: {side,acct,acct_nm,amt} 또는 {debcre,glmaster,glname,type}
+                const side    = line.side    || line.debcre   || 'D';
+                const acct    = line.acct    || line.glmaster || '';
+                const acct_nm = line.acct_nm || line.glname   || '';
+                const ltype   = line.type    || '';
+                const amt     = line.amt     || '{amt}';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><select class="side">
+                        <option value="D" ${side === 'D' ? 'selected' : ''}>차변</option>
+                        <option value="C" ${side === 'C' ? 'selected' : ''}>대변</option>
+                    </select></td>
+                    <td><input type="text" class="acct"      value="${escHtml(acct)}"    placeholder="예: 253000"></td>
+                    <td><input type="text" class="acct_nm"   value="${escHtml(acct_nm)}" placeholder="예: 미지급금"></td>
+                    <td><input type="text" class="line_type" value="${escHtml(ltype)}"   placeholder="AR/AP/EXP/REV/TAX"></td>
+                    <td><input type="text" class="amt"       value="${escHtml(String(amt))}"></td>
+                    <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 수정 모드 UI 전환
+        setEditMode(true, item.id);
+
+        // 리스트 행 하이라이트
+        if (currentActiveRow) currentActiveRow.classList.remove('active-row');
+        const row = document.querySelector(`#list-body tr[data-id="${item.id}"]`);
+        if (row) { row.classList.add('active-row'); currentActiveRow = row; }
+
+        // 폼 상단으로 스크롤
+        document.getElementById('form-section').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ────────────────────────────────────────────
+    //  수정 모드 / 등록 모드 UI 전환
+    // ────────────────────────────────────────────
+    function setEditMode(isEdit, id) {
+        const section    = document.getElementById('form-section');
+        const formTitle  = document.getElementById('form-title');
+        const formIcon   = document.getElementById('form-icon');
+        const saveBtn    = document.getElementById('save-btn');
+        const cancelBtn  = document.getElementById('cancel-btn');
+
+        if (isEdit) {
+            section.classList.add('edit-mode');
+            formIcon.textContent  = '✏️';
+            formTitle.textContent = `패턴 수정 (ID: ${id})`;
+            saveBtn.textContent   = '💾 수정 저장하기';
+            cancelBtn.style.display = 'block';
+        } else {
+            section.classList.remove('edit-mode');
+            formIcon.textContent  = '📝';
+            formTitle.textContent = '표준 분개 패턴 등록';
+            saveBtn.textContent   = '💾 DB에 지식 저장하기';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    // ────────────────────────────────────────────
+    //  폼 초기화 (신규 등록 모드로 복귀)
+    // ────────────────────────────────────────────
+    function resetForm() {
+        document.getElementById('edit-id').value    = '';
+        document.getElementById('pattern_nm').value = '';
+        document.getElementById('example_tx').value = '';
+        document.getElementById('docty').value       = 'GL';
+        document.getElementById('currency').value    = 'KRW';
+
+        // 분개 라인 초기화
+        const tbody = document.getElementById('journal-body');
+        tbody.innerHTML = `
+            <tr>
+                <td><select class="side"><option value="D">차변</option><option value="C">대변</option></select></td>
+                <td><input type="text" class="acct"      placeholder="예: 253000"></td>
+                <td><input type="text" class="acct_nm"   placeholder="예: 미지급금"></td>
+                <td><input type="text" class="line_type" placeholder="AR/AP/EXP/REV/TAX"></td>
+                <td><input type="text" class="amt" value="{amt}"></td>
+                <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
+            </tr>`;
+
+        // 하이라이트 해제
+        if (currentActiveRow) { currentActiveRow.classList.remove('active-row'); currentActiveRow = null; }
+
+        setEditMode(false, null);
+    }
+
+    // ────────────────────────────────────────────
+    //  라인 추가 / 삭제
+    // ────────────────────────────────────────────
     function addRow() {
         const tr = `<tr>
             <td><select class="side"><option value="D">차변</option><option value="C">대변</option></select></td>
-            <td><input type="text" class="acct"></td><td><input type="text" class="acct_nm"></td>
+            <td><input type="text" class="acct"      placeholder="예: 253000"></td>
+            <td><input type="text" class="acct_nm"   placeholder="예: 미지급금"></td>
+            <td><input type="text" class="line_type" placeholder="AR/AP/EXP/REV/TAX"></td>
             <td><input type="text" class="amt" value="{amt}"></td>
             <td><button class="btn btn-del" onclick="removeRow(this)">삭제</button></td>
         </tr>`;
@@ -98,40 +306,79 @@
 
     function removeRow(btn) {
         const rows = document.querySelectorAll('#journal-body tr');
-        if(rows.length > 1) btn.closest('tr').remove();
+        if (rows.length > 1) btn.closest('tr').remove();
         else alert("최소 한 줄은 있어야 합니다.");
     }
 
+    // ────────────────────────────────────────────
+    //  저장 (신규 POST / 수정 PUT 자동 분기)
+    // ────────────────────────────────────────────
     async function saveData() {
+        const patternNm = document.getElementById('pattern_nm').value.trim();
+        const exampleTx = document.getElementById('example_tx').value.trim();
+        if (!patternNm || !exampleTx) {
+            alert("패턴명과 자연어 예시는 필수입니다."); return;
+        }
+
         const rows = document.querySelectorAll('#journal-body tr');
         const journal = Array.from(rows).map(r => ({
-            side: r.querySelector('.side').value,
-            acct: r.querySelector('.acct').value,
-            acct_nm: r.querySelector('.acct_nm').value,
-            amt: r.querySelector('.amt').value
+            side:      r.querySelector('.side').value,
+            acct:      r.querySelector('.acct').value.trim(),
+            acct_nm:   r.querySelector('.acct_nm').value.trim(),
+            type:      r.querySelector('.line_type').value.trim(),
+            amt:       r.querySelector('.amt').value.trim()
         }));
 
         const payload = {
-            pattern_nm: document.getElementById('pattern_nm').value,
-            example_tx: document.getElementById('example_tx').value,
-            docty: document.getElementById('docty').value,
+            pattern_nm:   patternNm,
+            example_tx:   exampleTx,
+            docty:        document.getElementById('docty').value,
             journal_json: journal
         };
 
-        const res = await fetch('/api/pattern', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        alert(result.message);
-        location.reload();
+        const editId = document.getElementById('edit-id').value;
+        const isEdit = !!editId;
+        const url    = isEdit ? `/api/pattern/${editId}` : '/api/pattern';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const saveBtn = document.getElementById('save-btn');
+        saveBtn.disabled = true;
+        saveBtn.textContent = isEdit ? '⏳ 수정 저장 중...' : '⏳ 저장 중...';
+
+        try {
+            const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const result = await res.json();
+            alert(result.message);
+            if (result.status === 'success') {
+                resetForm();
+                await loadList();
+            }
+        } catch(e) {
+            alert("오류 발생: " + e.message);
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.textContent = isEdit ? '💾 수정 저장하기' : '💾 DB에 지식 저장하기';
+        }
     }
 
+    // ────────────────────────────────────────────
+    //  삭제
+    // ────────────────────────────────────────────
     async function deleteItem(id) {
-        if(!confirm("삭제하시겠습니까?")) return;
+        if (!confirm(`ID ${id} 패턴을 삭제하시겠습니까?`)) return;
+        // 수정 모드 중 해당 항목 삭제 시 폼도 초기화
+        if (document.getElementById('edit-id').value == id) resetForm();
         await fetch(`/api/pattern/${id}`, { method: 'DELETE' });
-        loadList();
+        await loadList();
+    }
+
+    // ────────────────────────────────────────────
+    //  유틸: HTML 이스케이프 (XSS 방어)
+    // ────────────────────────────────────────────
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     window.onload = loadList;
