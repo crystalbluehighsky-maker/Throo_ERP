@@ -1,5 +1,6 @@
 # ai_engine.py
 import os, json, voyageai, re, asyncio, csv, io, time, hashlib
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -51,6 +52,153 @@ class ThrooHybridEngine:
             return False
         _FAKE_EMPTY = {"", "-", "—", "–", "null", "none", "n/a", "없음", "해당없음", "미입력"}
         return val.strip().lower() in _FAKE_EMPTY
+
+    @staticmethod
+    def calculate_accounting_amounts(result_json: dict, raw_text: str = "") -> None:
+        """
+        AI의 산수 오류 및 오탐지(예: '구매1팀'의 '1')를 차단하는 최종 가드레일.
+
+        ─ 키워드 결정 우선순위 ─
+        1. raw_text에 '별도','제외','공급가','단가' 포함 → mode = SUPPLY 강제
+           추출 금액을 supply_base로 보고 부가세를 더해 total_amount 확정.
+           예) "330,000원 부가세 별도" → sup=330,000 → total=363,000
+        2. 위 키워드 없음 → mode = TOTAL 유지
+           추출 금액을 total_amount로 보고 역산(÷1.1)으로 공급가·세액 확정.
+           예) "330,000원 부가세 10%" → tot=330,000 → base=300,000 / vat=30,000
+
+        ─ 금액 연산 ─
+        float 부동소수점 오차를 방지하기 위해 Decimal + ROUND_HALF_UP을 사용한다.
+        result_json에 저장할 최종값은 int로 변환하여 JSON 직렬화 호환성을 유지한다.
+        """
+        def _to_d(value) -> Decimal:
+            """None·빈값을 안전하게 Decimal('0')으로 변환"""
+            return Decimal(str(value)) if value else Decimal('0')
+
+        def _round_won(value: Decimal) -> Decimal:
+            """원(KRW) 단위 ROUND_HALF_UP 반올림 (소수점 없음)"""
+            return value.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+
+        ZERO = Decimal('0')
+
+        # ══════════════════════════════════════════════════════════════════
+        # [가드레일 0] 부가세 관련성 검사 — 가장 먼저 실행
+        # 문장에 부가세 언급이 없으면 10% 안분 로직을 완전히 건너뛰고,
+        # total_amount를 그대로 공급가로 확정한다.
+        # "+" / "-" 포함: "300,000 + 부가세" 또는 "330,000 - 세액" 등 표현도 감지
+        # ══════════════════════════════════════════════════════════════════
+        _VAT_KEYWORDS = ["포함", "별도", "부가세", "VAT", "vat", "세금", "세액", "+", "-"]
+        _is_vat_relevant = any(kw in raw_text for kw in _VAT_KEYWORDS)
+
+        if not _is_vat_relevant:
+            # ── 1. 기준 금액 결정 ────────────────────────────────────────────
+            _tot0 = _to_d(result_json.get("total_amount"))
+            # AI가 금액을 추출하지 못했을 때 원문에서 직접 탐지
+            if _tot0 <= ZERO:
+                _text0 = raw_text.replace(",", "")
+                _pm0   = re.search(r'(\d[\d,]*)\s*원', raw_text)
+                _lnums = [Decimal(n) for n in re.findall(r'\d+', _text0) if len(n) >= 3]
+                if _pm0:
+                    _tot0 = Decimal(_pm0.group(1).replace(",", ""))
+                elif _lnums:
+                    _tot0 = max(_lnums)
+
+            # ── 2. AI 생성 오염 라인 청소 ────────────────────────────────────
+            # 부가세 언급 없음 → TAX 타입 라인은 근거 없는 Hallucination이므로 완전 삭제.
+            # 나머지 라인(EXP, AP 등)의 개별 amount를 0으로 초기화하여
+            # 이후 안분 로직(가드레일 우선권)에서 _tot0 기준으로 재계산되도록 유도.
+            _orig_lines     = result_json.get("lines", [])
+            _filtered_lines = [l for l in _orig_lines if l.get("type", "").upper() != "TAX"]
+            _removed_cnt    = len(_orig_lines) - len(_filtered_lines)
+            for l in _filtered_lines:
+                l["amount"] = 0
+
+            # ── 3. 금액 확정 (일괄 업데이트) ─────────────────────────────────
+            result_json["lines"] = _filtered_lines
+            result_json.update({
+                "total_amount": int(_tot0),
+                "supply_base":  int(_tot0),  # 합계 = 공급가 (부가세 없음)
+                "supply_vat":   0,
+                "vat_rate":     0,
+            })
+            logger.info(
+                f"[가드레일 0] 부가세 미언급 → TAX 라인 {_removed_cnt}개 제거, "
+                f"{int(_tot0):,}원 전액 비용화 완료 "
+                f"(supply_base={int(_tot0):,}, vat=0)"
+            )
+            return  # 이하 10% 안분 로직을 실행하지 않음
+
+        mode     = result_json.get("amt_mode", "TOTAL")
+        tot      = _to_d(result_json.get("total_amount"))
+        sup      = _to_d(result_json.get("supply_base"))
+        vat_rate = _to_d(result_json.get("vat_rate") or 10) / Decimal('100')
+        text_clean = raw_text.replace(",", "")
+
+        # [가드레일 1] 원문에서 '진짜' 기준 금액 탐지
+        # '원' 앞 숫자를 최우선, 없으면 3자리 이상 숫자 중 최댓값 사용
+        # → '구매1팀', '2026년' 등 문맥상 금액이 아닌 짧은 숫자를 자동 배제
+        price_match   = re.search(r'(\d[\d,]*)\s*원', raw_text)
+        all_long_nums = [Decimal(n) for n in re.findall(r'\d+', text_clean) if len(n) >= 3]
+
+        source_amount = ZERO
+        if price_match:
+            source_amount = Decimal(price_match.group(1).replace(",", ""))
+        elif all_long_nums:
+            source_amount = max(all_long_nums)
+
+        # [가드레일 2] 명시적 제외/별도/공급가 키워드 → mode 강제 결정
+        # AI의 amt_mode 판단보다 원문 키워드를 절대 우선한다.
+        exclusive_keywords   = ["별도", "제외", "공급가", "단가"]
+        is_explicit_exclusive = any(kw in raw_text for kw in exclusive_keywords)
+
+        if is_explicit_exclusive:
+            # 키워드 있음 → 원문 금액은 공급가(SUPPLY)
+            mode = "SUPPLY"
+            # source_amount를 supply_base 기준값으로 확정
+            # (AI가 tot에 넣었어도, 이 경우 공급가가 맞음)
+            sup = source_amount if source_amount > ZERO else (sup if sup > ZERO else tot)
+            logger.info(f"[가드레일] 별도/제외 키워드 감지 → SUPPLY 모드 강제 (sup={sup:,.0f})")
+        else:
+            # 키워드 없음 → 원문 금액은 합계(TOTAL)
+            mode = "TOTAL"
+            if tot > ZERO and str(int(tot)) not in text_clean and source_amount > ZERO:
+                # [가드레일 3] AI 산수(Hallucination) 감지 및 강제 보정
+                # tot가 원문에 없는 계산값이면 source_amount로 교체
+                original_tot = tot
+                tot = source_amount
+                for line in result_json.get("lines", []):
+                    line["amount"] = 0
+                logger.info(
+                    f"[가드레일] AI 산수 차단: {int(original_tot):,} 원문 없음 "
+                    f"→ 원문 금액 {int(tot):,}로 강제 환원 및 라인 재계산 실행"
+                )
+
+        # [최종 금액 확정 및 안분]
+        # 모든 연산은 Decimal로 수행하고, result_json 저장 시 int 변환하여 직렬화 호환성 확보
+        if mode == "SUPPLY" and sup > ZERO:
+            # 공급가 기준: total = supply_base + ROUND_HALF_UP(supply_base × vat_rate)
+            calculated_vat = _round_won(sup * vat_rate)
+            total_amount   = sup + calculated_vat
+            result_json["total_amount"] = int(total_amount)
+            result_json["supply_base"]  = int(sup)
+            result_json["supply_vat"]   = int(calculated_vat)
+            logger.info(
+                f"[금액확정] SUPPLY: sup={sup:,.0f} + vat={calculated_vat:,.0f} "
+                f"→ total={total_amount:,.0f}"
+            )
+        else:
+            # 합계 기준: supply_base = ROUND_HALF_UP(total ÷ (1 + vat_rate)), vat = total - base
+            if vat_rate > ZERO:
+                base = _round_won(tot / (Decimal('1') + vat_rate))
+                vat  = tot - base
+            else:
+                base = tot
+                vat  = ZERO
+            result_json["total_amount"] = int(tot)
+            result_json["supply_base"]  = int(base)
+            result_json["supply_vat"]   = int(vat)
+            logger.info(
+                f"[금액확정] TOTAL: tot={tot:,.0f} → base={base:,.0f} / vat={vat:,.0f}"
+            )
 
     @staticmethod
     def _match_status(score) -> str:
@@ -116,6 +264,8 @@ class ThrooHybridEngine:
             ("수리", "수선비"), ("보수", "수선비"), ("고장", "수선비"),
             ("소모품", "소모품비"), ("비품", "소모품비"), ("문구", "소모품비"),
             ("교육", "교육훈련비"), ("강의", "교육훈련비"), ("연수", "교육훈련비"),
+            ("대출이자", "이자비용"), ("차입금이자", "이자비용"), ("이자지급", "이자비용"),
+            ("이자납부", "이자비용"), ("예금이자", "이자수익"), ("이자입금", "이자수익"),
         ]
         
         for keyword, account_name in mapping:
@@ -137,8 +287,12 @@ class ThrooHybridEngine:
 ■ 여비교통: 510300|여비교통-출장비  510310|여비교통-시내교통
 ■ 통신비  : 510400|통신비-전화팩스  510410|통신비-우편발송  510420|통신비-전산회선료
 ■ 수도광열: 520000|수도광열-수도전기  521000|수도광열-냉난방비
-■ 기타비용: 523000|소모품비  524000|업무추진비(접대비)  533000|운반비  542000|지급수수료  542200|임차료  560000|보험료  579000|잡비
-■ 영업외  : 710000|이자수익  752000|이자비용  753000|잡손실"""
+■ 기타비용: 522060|세금과공과  523000|소모품비  524000|업무추진비(접대비)  533000|운반비  542000|지급수수료  542200|임차료  560000|보험료  579000|잡비
+■ 세금과공과(522060) 추가: 이제 과태료나 인지대 등을 정확히 분류합니다.
+■ 복리후생-경조금(510200) 추가: 화환이나 축의금 지출  
+■ 지급수수료-기타(542400) 추가: 일반적인 수수료 지출
+■ 광고선전비(545000) 추가: 홍보 관련 지출 대응
+■ 영업외  : 752000|이자비용  710000|이자수익  753000|잡손실"""
 
     def __init__(self):
         self.vo     = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
@@ -153,6 +307,10 @@ class ThrooHybridEngine:
 - 우체국 등기·우표·전화세·우편 발송 등 서류·정보 전달 비용 → 통신비-우편발송(510410)
 - 퀵서비스·택배·화물 운송 등 물건 물리적 이동 비용 → 운반비(533000)
 - 식대·야근식대·간식비 → 복리후생-야근식대(510100)
+- 과태료·벌과금·허가수수료·인지세·주민세·재산세·면허세 등 국가·지자체에 납부하는 세금 및 공과금
+  → 반드시 세금과공과(522060)를 우선 사용하라. 잡비(579000)로 처리하지 마라.
+- 대출이자·차입금이자 등 이자를 '지급'하거나 '납부'하는 경우 → 이자비용(752000)
+- 예금이자·적금이자 등 이자가 '입금'되거나 '들어온' 경우 → 이자수익(710000)
 - 차변과 대변의 합계는 반드시 일치해야 하며, 모든 금액은 숫자 형태로 출력한다.
 - 알 수 없는 계정코드는 절대 임의로 만들지 말고 glmaster를 ""(빈 문자열)로 출력하라.
 
@@ -162,15 +320,18 @@ class ThrooHybridEngine:
 - 자연어에 "세금계산서 발행일", "계산서 발행일", "세금계산서 일자", "세금계산서 발행" 등의 날짜가 명시된 경우:
   최상단 루트 JSON의 `tax_invoice_date` 필드에 YYYY-MM-DD 형식으로 반드시 출력하라. 절대 생략하지 마라.
   (예: "26.3.31일" → "2026-03-31", "26.04.10" → "2026-04-10")
-- 특히 부가세가 발생하는 매출(AR/CI) 거래이고 자연어에 날짜가 언급되었다면,
-  그 날짜가 세금계산서 발행일임을 강하게 추론하여 tax_invoice_date에 반드시 기입하라.
+- tax_invoice_date는 '발행', '계산서', '수취', '수신', '발급', '영수증', '전자' 등
+  증빙 발행과 관련된 명시적 키워드가 날짜와 함께 언급된 경우에만 추출하라.
+  단순히 "26.3.18일 삼성전자에..." 처럼 거래 발생일·시점을 나타내는 날짜는
+  절대로 tax_invoice_date에 넣지 말고 반드시 빈 문자열("")로 반환하라.
+- '부가세 포함', '부가세 별도', 'VAT', '세금', '세액' 등 금액 계산용 키워드는
+  증빙 발행과 무관하다. 이 단어들만 있고 증빙 키워드가 없다면
+  tax_invoice_date를 절대 채우지 말고 반드시 빈 문자열("")로 반환하라.
 - 연도가 두 자리(예: "26.3.31", "26.04.10")인 경우 2000년대로 처리한다.
   예: "26.3.31" → "2026-03-31",  "26.4.10" → "2026-04-10"
 
 [세금코드(taxcd) 추출 규칙]
-- 부가세가 발생하는 매출(CI) 전표: taxcd = "S010" 을 기본으로 도출하라.
-- 부가세가 발생하는 매입(SI) 전표: taxcd = "P010" 을 기본으로 도출하라.
-- 부가세가 없거나 전표 유형이 불명확한 경우: taxcd = "" (빈 문자열)로 출력하라.
+- 세금코드(taxcd)는 AI가 임의로 추론하지 않는다. 반드시 빈 문자열("")로 반환하라. 사용자가 팝업에서 직접 선택하도록 유도해야 한다.
 - taxcd 필드는 반드시 루트 JSON에 포함시켜라. 생략 금지.
 
 [사용자 명시 계정 최우선 원칙 — 절대 준수]
@@ -180,6 +341,14 @@ class ThrooHybridEngine:
 - 예: "긴다리의자 비품 구매" → '의자'라는 물품명에 집착하여 소모품으로 추론하지 말고,
   사용자가 명시한 '비품'을 계정으로 사용할 것.
 - [시스템 힌트] 섹션이 프롬프트에 포함된 경우, 그 지시를 다른 모든 규칙보다 최우선으로 따를 것.
+
+<AMOUNT_EXTRACTION_RULES>
+1. 문장에 나타난 숫자 그대로를 total_amount로 추출하라. (예: "10,000원치" → 10000)
+2. 당신이 임의로 10%를 더해 11,000으로 만드는 행위는 '데이터 조작'으로 간주된다.
+3. 명시적인 '공급가' 혹은 '부가세 별도' 단어가 없을 때는 절대로 amt_mode를 "SUPPLY"로 설정하지 마라.
+4. 문장에 '포함', '별도', '부가세', 'VAT', '세금', '세액' 등 부가세 관련 표현이 전혀 없다면 vat_rate를 반드시 0으로 출력하라.
+5. 위 조건(규칙 4)에 해당하는 경우 supply_base와 total_amount를 동일한 숫자로 채워라. 임의로 역산(÷1.1)하지 마라.
+</AMOUNT_EXTRACTION_RULES>
 
 [역분개(Reversal) 판단 규칙]
 - "매출감소", "매출취소", "매출반품", "매출에누리", "외상매출금 감소" 등의 표현은 역분개(마이너스 매출)임.
@@ -223,18 +392,43 @@ class ThrooHybridEngine:
     # _is_cash_receipt_only / _is_small_cash_expense 헬퍼에서 사용
     _AR_RECEIPT_KW  = ['입금', '수금', '수납', '들어왔', '받았']   # 현금/통장 수령 동사
     _CASH_KW        = ['현금', '통장', '계좌', '은행']              # 현금/은행 명사
-    _SMALL_CASH_KW  = ['퀵', '퀵비', '택배', '택배비']             # 소액 운반 비용
+    _SMALL_CASH_KW  = ['퀵', '퀵비', '택배', '택배비', '등기', '우편', '우표']  # 소액 운반 비용
+
+    # ── 선수금(계약금) 처리 감지 키워드 ─────────────────────────────────────
+    # CI(매출) 전표에서 이 키워드가 감지되면 대변 계정을 215000(선수금)으로 고정하고
+    # mulky='A' 를 세팅한다. 세금계산서 발행 대상 아님(SX 코드 힌트).
+    _ADVANCE_PAYMENT_KW = [
+        '계약금', '선입금', '선수금', '미리 입금', '미리입금',
+        '선불', '계약 입금', '선금', '착수금', '보증금 입금',
+    ]
+
+    # 즉시 지불 성격 비용: 이자·수수료·공과금 + 지급 조합 → SI가 아닌 GL 우선
+    # 예: "이자 지급", "수수료 납부", "공과금 결제" — 외상(AP 오픈아이템) 거래가 아님
+    _GL_OVERRIDE_KW  = ['이자', '수수료', '공과금', '세금과공과', '과태료', '벌과금',
+                        '인지세', '주민세', '재산세', '면허세']
+    _INSTANT_PAY_KW  = ['지급', '납부', '결제', '송금', '이체', '출금']
 
     def _detect_doctype_hint(self, raw_text: str) -> str:
         """
         Python 규칙 기반 전표 유형 1차 추론 (AI 호출 전).
 
         판정 우선순위:
+        0. 즉시 지불 비용(이자·수수료·공과금 + 지급) → GL 강제 (SI 오판 방지)
         1. 거래처 상호 탐지 + AR/AP 방향 키워드 조합 → CI / SI
         2. 거래처 미탐지여도 강한 행위 키워드(_STRONG_AR/AP_KW)만으로 판정 → CI / SI
            예: "LG전자에 납품하여 매출" — LG전자가 정규식에서 인식 안 될 때도 CI 보장
         3. 위 모두 해당 없음 → GL (일반전표)
         """
+        # ── 0순위: 즉시 지불 비용 키워드 조합 → GL 우선 ────────────────────────
+        # "이자 지급", "수수료 납부" 등은 외상 매입(AP) 거래가 아니므로 GL 유지
+        _has_gl_override = any(kw in raw_text for kw in self._GL_OVERRIDE_KW)
+        _has_instant_pay = any(kw in raw_text for kw in self._INSTANT_PAY_KW)
+        if _has_gl_override and _has_instant_pay:
+            logger.info(
+                f"[Doctype GL 우선] 즉시지불 비용 감지 ('{raw_text[:50]}') → GL 반환"
+            )
+            return 'GL'
+
         has_counterparty = bool(self._COUNTERPARTY_RE.search(raw_text))
         has_ar = any(kw in raw_text for kw in self._AR_KEYWORDS)
         has_ap = any(kw in raw_text for kw in self._AP_KEYWORDS)
@@ -312,10 +506,15 @@ class ThrooHybridEngine:
         doctype_hint = self._detect_doctype_hint(raw_text)
         logger.info(f"Doctype hint: {doctype_hint} for: '{raw_text[:40]}'")
 
-        # ── 특수 패턴 플래그 (AR수금폴백 / 소액현금지출) ─────────────────────
+        # ── 특수 패턴 플래그 (AR수금폴백 / 소액현금지출 / 선수금) ──────────────
         # Vector DB 미매칭 시 패턴 가이드를 분기하고, 후처리 단계에서 라인을 직접 생성한다.
-        flag_cash_receipt   = self._is_cash_receipt_only(raw_text)
-        flag_small_cash_exp = self._is_small_cash_expense(raw_text)
+        flag_cash_receipt    = self._is_cash_receipt_only(raw_text)
+        flag_small_cash_exp  = self._is_small_cash_expense(raw_text)
+        # 선수금 플래그: CI 힌트(또는 미결정) + 계약금/선수금 키워드 조합일 때 활성화
+        flag_advance_payment = (
+            doctype_hint in ("CI", None)
+            and any(kw in raw_text for kw in self._ADVANCE_PAYMENT_KW)
+        )
         # ── 법인카드 플래그: 단순 키워드 존재가 아닌 실제 결제 수단 판별 ──────────
         # 부정어/대체어가 있으면 "법카 언급됐지만 실제 결제는 다른 수단" → False
         _CORP_CARD_KW    = ['법카', '법인카드']
@@ -335,8 +534,14 @@ class ThrooHybridEngine:
             '내 개인카드', '개카', '내 카드로', '내카드로',
         ]
         # 정규식 보조 패턴: "내 XX원 지급", "내가 XX만원" 등 인칭+행위 조합
+        # ── 강화 포인트 ────────────────────────────────────────────────────────
+        # ① (?<!\w) : 선행 한글/영문자가 없을 때만 인칭대명사 매칭
+        #             (예: '제거', '제품' → 앞에 \w 없어도 뒤를 보고 차단)
+        # ② (?=[\s가이는은]) : 인칭대명사 다음에 반드시 공백 또는 조사(가·이·는·은)만 허용
+        #    → '내일'(내+일), '내려'(내+려), '저번'(저+번), '제거'(제+거) 오매칭 차단
+        #    → '내가', '내 현금', '저는', '제가' 등 정상 인칭 표현은 그대로 통과
         _OOP_RE  = re.compile(
-            r'(?:내|제|본인|저)\s*(?:가|이|는|은)?\s*(?:현금|돈|돈을|카드|개인카드|사비)'
+            r'(?<!\w)(?:내|제|본인|저)(?=[\s가이는은])(?:\s*(?:가|이|는|은))?\s*(?:현금|돈|카드|개인카드|사비)'
             r'|사비\s*(?:로|결제|지급|지불|냄|냈|냈다)',
             re.IGNORECASE
         )
@@ -351,16 +556,41 @@ class ThrooHybridEngine:
         # "매출감소", "매출취소", "매입반품" 등 역분개 문맥 감지.
         # 감지 시 AI가 생성한 lines의 차대변을 파이썬에서 Swap(D↔C)한다.
         # 전표유형(CI/SI)은 변경하지 않음 — 매출감소도 여전히 CI 거래.
-        _REVERSAL_ACTION_KW  = ['감소', '취소', '반품', '환입', '에누리', '마이너스', '차감', '환불']
+        #
+        # 판정 3계층:
+        # ① 행위 키워드 + 대상 키워드 동시 존재 (기존 방식)
+        # ② 복합어 정규식: '매출감소', '매입취소' 등 subject+action이 붙어있는 단어 감지
+        # ③ 독립 역분개 용어: '오입금', '오지급', '네트' — subject 없어도 단독으로 역분개 확정
+        _REVERSAL_ACTION_KW  = [
+            '감소', '취소', '반품', '환입', '에누리', '마이너스', '차감', '환불',
+            '환출', '반송', '반출', '감액', '상계', '반전', '철회', '반환',   # 확장
+        ]
         _REVERSAL_SUBJECT_KW = ['매출', '매입', '외상', '채권', '채무', '세금계산서']
-        _has_reversal_action  = any(kw in raw_text for kw in _REVERSAL_ACTION_KW)
-        _has_reversal_subject = any(kw in raw_text for kw in _REVERSAL_SUBJECT_KW)
-        flag_reversal = _has_reversal_action and _has_reversal_subject
+
+        # ② 복합어 정규식: subject와 action이 최대 5자 이내로 인접한 경우 포착
+        _REVERSAL_COMPOUND_RE = re.compile(
+            r'(?:매출|매입|외상|채권|채무|세금계산서)\s{0,2}'
+            r'(?:감소|취소|반품|환입|에누리|차감|환불|환출|반송|반출|감액|상계|반전|철회|반환)',
+            re.IGNORECASE
+        )
+        # ③ 단독 역분개 확정어 (주어/대상 없이도 역분개로 판정)
+        _REVERSAL_STANDALONE_KW = ['오입금', '오지급', '네트']
+
+        _has_reversal_action     = any(kw in raw_text for kw in _REVERSAL_ACTION_KW)
+        _has_reversal_subject    = any(kw in raw_text for kw in _REVERSAL_SUBJECT_KW)
+        _has_reversal_compound   = bool(_REVERSAL_COMPOUND_RE.search(raw_text))
+        _has_reversal_standalone = any(kw in raw_text for kw in _REVERSAL_STANDALONE_KW)
+
+        is_opposite_entry = (
+            (_has_reversal_action and _has_reversal_subject)   # ① 키워드 조합
+            or _has_reversal_compound                          # ② 복합어 정규식
+            or _has_reversal_standalone                        # ③ 단독 반대분개(Opposite Entry) 용어
+        )
 
         if flag_cash_receipt:   logger.info(f"[플래그] AR 수금 폴백 활성화: '{raw_text[:30]}'")
         if flag_small_cash_exp: logger.info(f"[플래그] 소액 현금 지출 활성화: '{raw_text[:30]}'")
         if flag_out_of_pocket:  logger.info(f"[플래그] 사비 대납(OOP) 감지 → AP 미지급금 강제 Override 예정: '{raw_text[:50]}'")
-        if flag_reversal:       logger.info(f"[플래그] 역분개(Reversal) 감지 → D/C Swap 예정: '{raw_text[:60]}'")
+        if is_opposite_entry:   logger.info(f"[플래그] 반대분개(Opposite Entry) 감지 → D/C Swap 예정: '{raw_text[:60]}'")
         if _corp_mentioned and _corp_negated:
             logger.info(f"[플래그] 법인카드 언급 있으나 부정/대체 문맥 → flag_corp_card=False: '{raw_text[:40]}'")
         elif flag_corp_card:
@@ -671,7 +901,7 @@ class ThrooHybridEngine:
                 logger.info("Gemini 잘린 JSON 복구 성공")
             result_json['pattern_id']   = pattern_id
             result_json['doctyp']       = effective_docty
-            result_json['source']       = "DB" if (pattern_id or gl_fallback_matched) else "AI"
+            result_json['source']       = "DB" if pattern_id else ("FB" if gl_fallback_matched else "AI")
             result_json['needs_review'] = needs_review   # STEP3: UI "수동 확인 필요" 플래그
 
             # ── 필드명 정규화 (AI 출력 키 → 백엔드 표준 키) ─────────────────
@@ -694,6 +924,49 @@ class ThrooHybridEngine:
                 f" (원본 tax_invoice_date='{_tid_cur}', tax_date='{_tdt_cur}')"
             )
 
+            # ── 세금계산서 발행일 정규식 보완 (AI 미추출 시 원문에서 직접 탐지) ──────
+            # 키워드: "세금계산서/계산서/세금" + "발행일/일자/날짜" 뒤의 날짜 패턴 추출
+            # 예: "세금계산서 발행일 26.3.31" → "2026-03-31"
+            # Fallback: 증빙 확정 키워드가 있을 때만 전표일을 복사, 없으면 빈값 유지
+            if not result_json.get("tax_invoice_date"):
+                _TAX_DATE_RE = re.compile(
+                    r'(?:세금계산서|계산서|세금)\s*(?:발행일|일자|날짜)[^\d]*'
+                    r'(\d{2,4})[.\-/년](\d{1,2})[.\-/월](\d{1,2})',
+                    re.IGNORECASE
+                )
+                _td_m = _TAX_DATE_RE.search(raw_text)
+                if _td_m:
+                    _y, _m, _d = _td_m.groups()
+                    if len(_y) == 2:
+                        _y = '20' + _y
+                    result_json["tax_invoice_date"] = f"{_y}-{int(_m):02d}-{int(_d):02d}"
+                    logger.info(
+                        f"[tax_invoice_date 정규식 보완] 원문에서 발행일 추출: "
+                        f"'{result_json['tax_invoice_date']}'"
+                    )
+                else:
+                    # 명시적 발행일 미감지 → 증빙 확정 키워드 있을 때만 전표일 복사
+                    # 증빙 언급이 없는 일반 경비는 빈값 유지 (사용자가 직접 입력)
+                    # '전자' 단독어 제외 — '전자제품', '전자기기' 등 비증빙 단어 오탐 방지
+                    # '전자계산서' / '전자세금계산서' 는 명시적 증빙 행위이므로 유지
+                    _invoice_trigger_words = [
+                        '발행', '계산서', '세금계산서', '발급', '수취', '수신',
+                        '영수증', '전자계산서', '전자세금계산서', '끊다', '끊어',
+                    ]
+                    _has_tax_mention = any(kw in raw_text for kw in _invoice_trigger_words)
+                    if _has_tax_mention:
+                        _fallback_dt = result_json.get("date", "")
+                        result_json["tax_invoice_date"] = _fallback_dt
+                        logger.info(
+                            f"[tax_invoice_date fallback] 증빙 키워드 감지 → "
+                            f"trx_date='{_fallback_dt}' 복사"
+                        )
+                    else:
+                        result_json["tax_invoice_date"] = ""
+                        logger.info(
+                            "[tax_invoice_date fallback] 증빙 언급 없음 → 빈값 유지 (사용자 직접 입력)"
+                        )
+
             # ── 라인 내 due_date 정규화 → duedt 로 복사 (PHASE D 처리를 위해) ─
             # AI가 line["due_date"]로 반환하는 경우가 있으므로 line["duedt"]에 흡수
             for _l in result_json.get("lines", []):
@@ -706,8 +979,15 @@ class ThrooHybridEngine:
             # "AI"       : Vector DB 미매칭, t_cglmst 미탐지 → Gemini 순수 추론
             # AR수금폴백(시스템 규칙), Intent Override(intent_override=True)는
             # 이후 단계에서 각자 설정/플래그로 처리되므로 여기서는 기본값만 주입.
-            # gl_fallback_matched = t_cglmst 텍스트 검색으로 실제 계정을 찾은 경우 → 'DB 참조'
-            _line_src = "DB" if (pattern_id or gl_fallback_matched) else "AI"
+            # 1. 벡터 패턴 완전 일치 → "DB"  (UI: 패턴참조)
+            # 2. 패턴 없이 마스터 DB 계정 매칭 → "FB"  (UI: 계정참조)
+            # 3. 순수 AI 추론 → "AI"  (UI: AI추론)
+            if pattern_id:
+                _line_src = "DB"
+            elif gl_fallback_matched:
+                _line_src = "FB"
+            else:
+                _line_src = "AI"
             for _l in result_json.get("lines", []):
                 _l.setdefault("source", _line_src)  # 이미 설정된 source(예: 규칙 반영) 유지
 
@@ -737,28 +1017,35 @@ class ThrooHybridEngine:
                         f"[Account Match] 패턴(id={pattern_id}) 계정 그대로 사용"
                     )
             
-            # 💡 파이썬 백엔드 수학적 금액 강제 계산 로직
-            tot = float(result_json.get("total_amount", 0))
-            vr  = float(result_json.get("vat_rate", 0))
+            # 💡 파이썬 백엔드 수학적 금액 강제 계산 로직 (AMOUNT_EXTRACTION_RULES 반영)
+            self.calculate_accounting_amounts(result_json, raw_text)
+            tot = result_json["total_amount"]
+            base = result_json["supply_base"]
+            vat = result_json["supply_vat"]
+            vr = float(result_json.get("vat_rate", 0))
 
             # ── total_amount 유효성 검증 ──────────────────────────────────────
             if tot <= 0:
                 logger.error(f"total_amount가 0 또는 음수: {tot} | raw_text='{raw_text[:60]}'")
                 raise Exception(f"AI가 금액을 추출하지 못했습니다 (total_amount={tot}). 문장을 다시 입력하세요.")
 
-            # ── 부가세 안분 (부가세 포함 총액 기준) ──────────────────────────
-            # 공식: base = round(tot / 1.1),  vat = tot - base
-            # 예시: tot=330,000 → base=300,000, vat=30,000
-            base = round(tot / 1.1) if vr > 0 else tot
-            vat  = tot - base       if vr > 0 else 0
-
-            logger.info(f"금액 안분: tot={tot:,.0f} / vr={vr}% → base={base:,.0f}, vat={vat:,.0f}")
+            logger.info(f"금액 안분: tot={tot:,.0f} / vr={vr}% → base={base:,.0f}, vat={vat:,.0f} (mode={result_json.get('amt_mode', 'TOTAL')})")
 
             # 만기일 변수 확보
             due_date = result_json.get("due_date", "")
             
             # 3. 마스터 DB 정밀 매핑 (pg_trgm similarity 검색, 전처리 후 검색어 사용)
             # ── 거래처 (t_cbizpt) ─────────────────────────────────────────────
+            # ── AI JSON 키 정규화: AI가 임의 키명으로 거래처를 반환할 경우 bizname으로 통일 ──
+            # AI가 vendor_name / partner_name / bizname1 등의 키를 사용할 수 있으므로
+            # 먼저 알려진 대체 키들을 bizname으로 흡수한다. 이미 bizname이 있으면 유지.
+            for _alias in ("vendor_name", "partner_name", "company_name", "bizname1"):
+                _alias_val = result_json.pop(_alias, None)
+                if _alias_val and not result_json.get("bizname"):
+                    result_json["bizname"] = _alias_val
+                    logger.info(f"[Bizname 키 정규화] '{_alias}' → 'bizname': '{_alias_val}'")
+                    break
+
             bn_raw = result_json.get("bizname", "")
             bn     = self._clean_search_term(bn_raw)
             result_json["bizptcd"] = ""
@@ -800,6 +1087,89 @@ class ThrooHybridEngine:
                     logger.info(f"Bizpt similarity: '{bn}' → '{row.bizname1}' score={score:.3f} [{status}]")
                 else:
                     logger.info(f"Bizpt: no similarity match for '{bn}' (score < 0.25)")
+
+            # ── LIKE 부분 일치 Fallback ────────────────────────────────────────
+            # similarity 검색에서 0.25 미만으로 실패한 경우(예: '삼성전자' vs '삼성전자(주)')
+            # ILIKE '%검색어%' 로 재탐색하여 안전하게 매핑.
+            if bn and not result_json.get("bizptcd"):
+                like_row = db.execute(
+                    text("""
+                        SELECT bizptcd, bizname1, suppgl, custgl
+                        FROM t_cbizpt
+                        WHERE comcd = :c
+                          AND bizname1 ILIKE :n
+                        ORDER BY bizptcd ASC
+                        LIMIT 1
+                    """),
+                    {"c": comcd, "n": f"%{bn}%"}
+                ).fetchone()
+                if like_row:
+                    result_json["bizptcd"]          = like_row.bizptcd
+                    result_json["bizname"]          = like_row.bizname1
+                    result_json["biz_match_status"] = "FUZZY"
+                    biz_suppgl = like_row.suppgl or ""
+                    biz_custgl = like_row.custgl or ""
+                    logger.info(
+                        f"Bizpt LIKE fallback: '%{bn}%' → "
+                        f"'{like_row.bizname1}' ({like_row.bizptcd})"
+                    )
+                else:
+                    logger.info(f"Bizpt LIKE fallback: '%{bn}%' 도 일치 없음")
+
+            # ── 최종 안전망: 법인격 제거 후 LIKE 강화 검색 ──────────────────────────
+            # similarity + 1차 LIKE 이후에도 bizptcd가 여전히 없을 때 실행.
+            # '주식회사', '(주)' 등 법인 접미사를 모두 제거한 핵심 키워드로 재탐색.
+            # 결과 존재 시 result_json의 bizptcd / bizname을 DB 값으로 강제 덮어쓰기.
+            # try-except 로 감싸 이 단계의 오류가 전표 파싱 전체를 중단시키지 않게 보장.
+            if bn_raw and not result_json.get("bizptcd"):
+                try:
+                    _corp_sfx = [
+                        "주식회사", "(주)", "유한회사", "(유)",
+                        "합자회사", "(합)", "합명회사", "협동조합",
+                    ]
+                    _bn_core = bn_raw                   # AI 추출 원본(정제 전) 사용
+                    for _sfx in _corp_sfx:
+                        _bn_core = _bn_core.replace(_sfx, "")
+                    _bn_core = _bn_core.strip()
+
+                    if _bn_core:
+                        _safe_row = db.execute(
+                            text("""
+                                SELECT bizptcd, bizname1, suppgl, custgl
+                                FROM t_cbizpt
+                                WHERE comcd = :c
+                                  AND bizname1 ILIKE :n
+                                ORDER BY bizptcd ASC
+                                LIMIT 1
+                            """),
+                            {"c": comcd, "n": f"%{_bn_core}%"}
+                        ).fetchone()
+                        if _safe_row:
+                            # 강제 덮어쓰기: DB의 정확한 마스터 값으로 최종 갱신
+                            result_json["bizptcd"]          = _safe_row.bizptcd
+                            result_json["bizname"]          = _safe_row.bizname1
+                            result_json["biz_match_status"] = "FUZZY"
+                            biz_suppgl = _safe_row.suppgl or ""
+                            biz_custgl = _safe_row.custgl or ""
+                            logger.info(
+                                f"[Bizpt 법인격 제거 검색] '{bn_raw}' → "
+                                f"core='{_bn_core}' → DB: "
+                                f"'{_safe_row.bizname1}' ({_safe_row.bizptcd})"
+                            )
+                        else:
+                            logger.info(
+                                f"[Bizpt 법인격 제거 검색] '%{_bn_core}%' 일치 없음 "
+                                f"— 수동 입력 필요"
+                            )
+                    else:
+                        logger.info(
+                            f"[Bizpt 법인격 제거 검색] 법인격 제거 후 핵심어 없음 "
+                            f"(원본: '{bn_raw}')"
+                        )
+                except Exception as _biz_ex:
+                    logger.warning(
+                        f"[Bizpt 법인격 제거 검색 오류] {_biz_ex} — 거래처 매핑 생략"
+                    )
 
             # ── AP 가상 벤더 검색 (SI 거래 + 거래처 미확인) ───────────────────────────
             # 지출 거래에서 거래처명이 명시되지 않은 경우, t_cbizpt에서 '가상거래처'를 검색해 매핑.
@@ -973,12 +1343,27 @@ class ThrooHybridEngine:
                 result_json["ana_match_score"],
             ), 3)
 
-            dt = result_json.get("doctyp", "GL")
-            txcd = "S010" if dt == "CI" and vr > 0 else "S170" if dt == "CI" and vr == 0 else "P010" if dt == "SI" and vr > 0 else "P110" if dt == "SI" and vr == 0 else ""
-            result_json["taxcd"], result_json["taxnm"] = txcd, ""
+            result_json["taxcd"] = ""
+            result_json["taxnm"] = ""
+            txcd = result_json["taxcd"]
+
+            # ── txgubun 조회: t_ntxkey JOIN t_ctxkey → 세금 처리 유형 판별 ──────────
+            # '1': 일반과세(10%, 세액공제 가능)
+            # 'D': 매입불공제(10%이나 세액공제 불가 → EXP 라인에 세액 합산)
+            # '2','3': 영세율·면세(0%, TAX 라인 없음)
+            txgubun = ""
             if txcd:
-                row = db.execute(text("SELECT taxcd, taxnm FROM t_ctxkey WHERE comcd=:c AND taxcd=:t LIMIT 1"), {"c": comcd, "t": txcd}).fetchone()
-                if row: result_json["taxcd"], result_json["taxnm"] = row[0], row[1]
+                _tg = db.execute(text("""
+                    SELECT n.txgubun
+                    FROM   t_ctxkey c
+                    JOIN   t_ntxkey n ON c.taxcd = n.taxcd
+                    WHERE  c.comcd = :c AND c.taxcd = :t
+                    LIMIT  1
+                """), {"c": comcd, "t": txcd}).fetchone()
+                if _tg:
+                    txgubun = (_tg[0] or "").strip()
+            result_json["txgubun"] = txgubun
+            logger.info(f"[세금유형] taxcd={txcd or '없음'} → txgubun='{txgubun}'")
 
             # ── null-gltype 가계정 사전 조회 (AR수금폴백·gltype 검증 공통 사용) ────────
             # gltype IS NULL/'' : 거래처(bizptcd) 없이 사용 가능한 GL 계정 (오픈아이템 불필요)
@@ -1198,9 +1583,19 @@ class ThrooHybridEngine:
                     line["due_date_enabled"] = False
 
                 # ★ Intent Override: 사용자가 직접 언급한 계정명이 있을 때 AI 추론 계정보다 우선 적용
-                # AR/AP(거래처 마스터), TAX 라인 및 이미 거래처 잠금된 라인은 제외
+                # AR/AP(거래처 마스터), TAX 라인 및 이미 거래처 잠금된 라인은 제외.
+                # 대변(C)이면서 현금 계정(glmaster='100000' 또는 glname에 '현금' 포함)인 라인도 제외:
+                # 소액현금지출·운반비 등에서 대변 현금을 의도치 않게 덮어쓰는 것을 방지.
+                _is_cash_credit = (
+                    line.get("debcre") == "C"
+                    and (
+                        line.get("glmaster") == "100000"
+                        or "현금" in (line.get("glname") or "")
+                    )
+                )
                 if (intent_gl_map
                         and not line.get("biz_gl_locked")
+                        and not _is_cash_credit
                         and l_type not in ["AR", "AP", "TAX"]):
                     for gl_code, gl_info in intent_gl_map.items():
                         if gl_code in used_intent_gl:
@@ -1214,16 +1609,77 @@ class ThrooHybridEngine:
                             logger.info(f"Intent override → {gl_code} ({gl_info['glname1']}) on {l_type} line")
                             break
 
-                # ★ 만기일(duedt) — GL 검증 완료 후 gltype 기반 최종 결정
+                # ★ 만기일(duedt) — GL 검증 완료 후 gltype + 계정코드 기반 최종 결정
                 # t_cglmst.gltype = 'C'(고객 오픈아이템) / 'S'(공급업체 오픈아이템)만 만기일 허용.
-                # 비용·수익·자산·세금 계정은 거래처별 수금·지급 추적이 불필요 → duedt="" 강제.
+                # 예외: 215000(선수금) 계정은 gltype=""이지만 계약 이행일 관리 목적으로 만기일 활성화.
                 _fgt = line.get("gltype", "")
+                _is_adv_gl = (line.get("glmaster", "") == "215000")
                 if _fgt in ("C", "S"):
                     line["duedt"]            = line.get("due_date", "") or due_date
                     line["due_date_enabled"] = True
+                elif _is_adv_gl:
+                    # 선수금(215000): 1순위=AI 추출 due_date, 2순위=전기일자(result_json["date"])
+                    _adv_due = line.get("due_date", "") or due_date or result_json.get("date", "")
+                    line["duedt"]            = _adv_due if not self.is_empty_value(_adv_due) else result_json.get("date", "")
+                    line["due_date_enabled"] = True
+                    logger.info(f"[선수금] duedt 자동 설정: '{line['duedt']}' (AI='{line.get('due_date','')}' / 전기일='{result_json.get('date','')}')")
                 else:
                     line["duedt"]            = ""
                     line["due_date_enabled"] = False
+
+            # ══════════════════════════════════════════════════════════════════
+            # ── PHASE 0-ADV: 선수금(계약금) 대변 계정 강제 고정 ──────────────────
+            #
+            # 조건: CI 전표 + 선수금 키워드 감지(flag_advance_payment)
+            # 동작: ① 대변(C) 라인 중 EXP/REV/AR 타입 → glmaster=215000(선수금)으로 덮어씀
+            #       ② biz_gl_locked=True 세팅 → Intent Override·PHASE 0-X 대상 제외
+            #       ③ result_json["mulky"]="A" 세팅 → mainai.py 저장 시 4개 테이블 반영
+            #       ④ effective_docty를 CI로 확정
+            # ══════════════════════════════════════════════════════════════════
+            if flag_advance_payment and effective_docty in ("CI", "GL", None, ""):
+                # t_cglmst에서 215000 존재 여부 확인
+                _adv_row = db.execute(
+                    text("SELECT glmaster, glname1 FROM t_cglmst WHERE comcd=:c AND glmaster='215000' LIMIT 1"),
+                    {"c": comcd},
+                ).fetchone()
+
+                if _adv_row:
+                    _adv_applied = False
+                    for _al in result_json.get("lines", []):
+                        _al_type  = _al.get("type", "").upper()
+                        _al_dc    = _al.get("debcre", "")
+                        # 대변(C) 이면서 세금·AR 오픈아이템이 아닌 라인을 215000으로 교체
+                        if _al_dc == "C" and _al_type not in ("TAX",) and not _adv_applied:
+                            _al["glmaster"]      = "215000"
+                            _al["glname"]        = _adv_row.glname1 or "선수금"
+                            _al["gltype"]        = ""          # 선수금은 오픈아이템 아님
+                            _al["biz_gl_locked"] = True        # 후속 Override 차단
+                            _al["source"]        = "규칙 반영"
+                            _al["type"]          = "EXP"       # 안분 로직상 base 금액 사용
+                            _adv_applied = True
+                            logger.info(f"[선수금] 대변 라인 → 215000({_adv_row.glname1}) 강제 고정")
+
+                    if _adv_applied:
+                        result_json["mulky"]           = "A"
+                        result_json["advance_payment"] = True
+                        result_json["doctyp"]          = "CI"
+                        effective_docty                = "CI"
+                        # SX(매출-세금무관): DB 존재 여부와 무관하게 UI 표시용으로 항상 세팅.
+                        # taxnm은 DB에서 조회, 없으면 기본 레이블 사용.
+                        _sx_meta = db.execute(
+                            text("SELECT taxnm FROM t_ctxkey WHERE comcd=:c AND taxcd='SX' LIMIT 1"),
+                            {"c": comcd},
+                        ).fetchone()
+                        result_json["taxcd"] = "SX"
+                        result_json["taxnm"] = _sx_meta.taxnm if _sx_meta else "세금무관"
+                        result_json["taxnm"] = result_json["taxnm"] or "세금무관"
+                        logger.info(
+                            f"[선수금] mulky='A', taxcd='SX', taxnm='{result_json['taxnm']}'"
+                        )
+                    else:
+                        logger.warning("[선수금] 대변 라인을 찾지 못해 Override 건너뜀")
+                else:
+                    logger.warning("[선수금] t_cglmst에 215000 미등록 → 선수금 Override 건너뜀")
 
             # ══════════════════════════════════════════════════════════════════
             # ── PHASE 0-X: 명시 계정 파이썬 강제 보정 (LLM 2차 방어선) ──────────
@@ -1237,16 +1693,16 @@ class ThrooHybridEngine:
             #   AR(매출) 문맥     → 대변(C) 라인 중 REV 타입 우선,
             #                         없으면 AR·TAX 제외한 첫 번째 C 라인
             #
-            # is_reversal이 True면 D/C가 이미 Swap된 상태이므로 방향을 반전하여 적용.
+            # is_opposite_entry가 True면 D/C가 이미 Swap된 상태이므로 방향을 반전하여 적용.
             # ══════════════════════════════════════════════════════════════════
             if explicit_gl_match:
                 _xcode  = explicit_gl_match["glmaster"]
                 _xname  = explicit_gl_match["glname1"]
                 _xtype  = explicit_gl_match.get("gltype", "")
                 _xlines = result_json.get("lines", [])
-                # PHASE 0-R 이전이므로 result_json["is_reversal"]은 아직 미설정.
-                # 사전 감지된 flag_reversal 변수를 직접 참조.
-                _is_reversal_now = flag_reversal
+                # PHASE 0-R 이전이므로 result_json["is_opposite_entry"]은 아직 미설정.
+                # 사전 감지된 is_opposite_entry 변수를 직접 참조.
+                _is_opposite_entry_now = is_opposite_entry
 
                 # 현재 문맥 재판별 (post-processing 시점)
                 _post_ap = effective_docty in ("SI", "GL") or any(
@@ -1256,11 +1712,11 @@ class ThrooHybridEngine:
                     kw in raw_text for kw in ['매출', '판매', '납품', '청구', '수금']
                 )
 
-                # Reversal이면 D/C 이미 Swap됨 → 대상 방향도 반전
+                # 반대분개(Opposite Entry)면 D/C 이미 Swap됨 → 대상 방향도 반전
                 _target_side = "D"  # AP: 차변 라인을 교정
                 if _post_ar and not _post_ap:
                     _target_side = "C"  # AR: 대변 라인을 교정
-                if _is_reversal_now:
+                if _is_opposite_entry_now:
                     _target_side = "C" if _target_side == "D" else "D"
 
                 # 교정 제외 type 목록 (AP/AR 오픈아이템, 부가세 라인은 건드리지 않음)
@@ -1373,23 +1829,66 @@ class ThrooHybridEngine:
             # 처리 규칙:
             # - doctyp은 그대로 유지 (CI는 CI, SI는 SI)
             # - 금액 부호는 양수 유지 (마이너스 분개 방식 불사용)
-            # - 이미 flag_out_of_pocket으로 대변이 교정된 경우에는 Swap 수행하지 않음
-            #   (사비 대납 역분개는 현재 시나리오 범위 외)
+            # - 역분개 키워드가 감지된 경우 사비 대납(OOP) 여부와 무관하게 반드시 실행.
+            #   Vector DB 이력이 정방향 패턴을 참조했더라도 현재 문맥이 역분개이면 Swap 우선.
+            # - result_json["is_opposite_entry"] = True 로 프론트엔드 배지 표시.
+            #
+            # ── 이중 스왑(Double Swap) 방어 ──────────────────────────────────
+            # AI가 이미 영리하게 역분개를 수행한 경우 파이썬 Swap을 생략한다.
+            # 판단 기준 (앵커 라인으로 방향 확인):
+            #  · CI(매출) : AR 라인(type='AR' 또는 gltype='C')이 이미 C(대변)이면 AI가 처리 완료
+            #  · SI(매입) : AP 라인(type='AP' 또는 gltype='S')이 이미 D(차변)이면 AI가 처리 완료
+            #  · 앵커 라인 없음(GL 등) : 무조건 Swap 실행
             # ══════════════════════════════════════════════════════════════════
-            if flag_reversal and not flag_out_of_pocket:
-                _swap_count = 0
-                for line in result_json.get("lines", []):
-                    if line.get("debcre") == "D":
-                        line["debcre"] = "C"
-                        _swap_count += 1
-                    elif line.get("debcre") == "C":
-                        line["debcre"] = "D"
-                        _swap_count += 1
-                result_json["is_reversal"] = True   # 프론트 배지 표시용 플래그
-                logger.info(
-                    f"[역분개 Swap] {_swap_count}개 라인 D/C 교체 완료 | "
-                    f"doctyp={result_json.get('doctyp')} (유지)"
-                )
+            if is_opposite_entry:
+                _doctyp = result_json.get("doctyp", "")
+                _lines  = result_json.get("lines", [])
+
+                # 앵커 라인으로 AI 역분개 선행 여부 확인
+                _already_reversed = False
+                if _doctyp == "CI":
+                    # 정방향 CI: AR 라인이 D(차변) → 역분개 시 C(대변)으로 바뀌어야 함
+                    for _l in _lines:
+                        if _l.get("type") == "AR" or _l.get("gltype") == "C":
+                            _already_reversed = (_l.get("debcre") == "C")
+                            logger.info(
+                                f"[역분개 방어] CI 앵커(AR/gltype=C) 라인 debcre='{_l.get('debcre')}' "
+                                f"→ already_reversed={_already_reversed}"
+                            )
+                            break
+                elif _doctyp == "SI":
+                    # 정방향 SI: AP 라인이 C(대변) → 역분개 시 D(차변)으로 바뀌어야 함
+                    for _l in _lines:
+                        if _l.get("type") == "AP" or _l.get("gltype") == "S":
+                            _already_reversed = (_l.get("debcre") == "D")
+                            logger.info(
+                                f"[역분개 방어] SI 앵커(AP/gltype=S) 라인 debcre='{_l.get('debcre')}' "
+                                f"→ already_reversed={_already_reversed}"
+                            )
+                            break
+
+                if _already_reversed:
+                    # AI가 이미 역분개 수행 → 파이썬 Swap 생략, 플래그만 세팅
+                    result_json["is_opposite_entry"] = True
+                    logger.info(
+                        f"[반대분개(Opposite Entry) Swap 생략] AI 선행 처리 감지 — 이중 스왑 방어 작동 "
+                        f"(doctyp={_doctyp})"
+                    )
+                else:
+                    # 파이썬이 강제 Swap 실행
+                    _swap_count = 0
+                    for line in _lines:
+                        if line.get("debcre") == "D":
+                            line["debcre"] = "C"
+                            _swap_count += 1
+                        elif line.get("debcre") == "C":
+                            line["debcre"] = "D"
+                            _swap_count += 1
+                    result_json["is_opposite_entry"] = True   # 프론트 배지 표시용 플래그
+                    logger.info(
+                        f"[반대분개(Opposite Entry) Swap 실행] {_swap_count}개 라인 D/C 교체 완료 | "
+                        f"doctyp={_doctyp} (유지)"
+                    )
 
             # ══════════════════════════════════════════════════════════════════
             # ── PHASE A: gltype C/S 기반 doctyp 강제 전환 ──────────────────────
@@ -1400,9 +1899,21 @@ class ThrooHybridEngine:
             _has_c_line = any(l.get("gltype") == "C" for l in result_json.get("lines", []))
             _has_s_line = any(l.get("gltype") == "S" for l in result_json.get("lines", []))
             _cur_doctyp = result_json.get("doctyp", effective_docty)
+
+            # 즉시 지불 문맥(이자·수수료·공과금 + 지급동사)이면 gltype=S여도 GL 유지
+            # 이자 지급·공과금 결제는 외상 매입(AP 오픈아이템)이 아니므로 SI 전환 불필요
+            _gl_override_ctx = (
+                any(kw in raw_text for kw in self._GL_OVERRIDE_KW)
+                and any(kw in raw_text for kw in self._INSTANT_PAY_KW)
+            )
             if _has_s_line and _cur_doctyp == "GL":
-                result_json["doctyp"] = "SI"
-                logger.info(f"[doctyp 강제전환] GL → SI (gltype=S 오픈아이템 라인 포함)")
+                if _gl_override_ctx:
+                    logger.info(
+                        f"[doctyp 강제전환 억제] gltype=S 존재하나 즉시지불 문맥 → GL 유지"
+                    )
+                else:
+                    result_json["doctyp"] = "SI"
+                    logger.info(f"[doctyp 강제전환] GL → SI (gltype=S 오픈아이템 라인 포함)")
             elif _has_c_line and _cur_doctyp == "GL":
                 result_json["doctyp"] = "CI"
                 logger.info(f"[doctyp 강제전환] GL → CI (gltype=C 오픈아이템 라인 포함)")
@@ -1426,27 +1937,6 @@ class ThrooHybridEngine:
                             f"[gltype 경고] bizptcd 없음, gltype='{orig_gltype}' 오픈아이템 계정({old_code}) — "
                             "거래처 선택 필요 (계정 치환 없음)"
                         )
-
-            # ══════════════════════════════════════════════════════════════════
-            # ── PHASE C-PRE: 세금코드(taxcd) Hardcode Fallback ───────────────
-            # LLM이 taxcd를 누락하거나 빈 값으로 반환할 경우를 대비한 파이썬 안전장치.
-            # 부가세(biztax) 합계가 0보다 크면 doctyp에 따라 표준 세금코드를 강제 주입한다.
-            # 이 단계가 완료된 후 PHASE C가 실행되므로:
-            #   - taxcd에 유효한 값 → PHASE C에서 EDITABLE 처리
-            #   - taxcd가 여전히 빈 값 → PHASE C에서 USER_SELECT_REQUIRED 처리
-            # ══════════════════════════════════════════════════════════════════
-            _pre_doctyp = result_json.get("doctyp", effective_docty)
-            _has_tax = sum(
-                float(l.get("biztax") or 0)
-                for l in result_json.get("lines", [])
-            ) > 0
-            if self.is_empty_value(result_json.get("taxcd")) and _has_tax:
-                if _pre_doctyp == "CI":
-                    result_json["taxcd"] = "S010"
-                    logger.info("[taxcd Fallback] 부가세 있는 CI 전표 → S010 자동 주입")
-                elif _pre_doctyp == "SI":
-                    result_json["taxcd"] = "P010"
-                    logger.info("[taxcd Fallback] 부가세 있는 SI 전표 → P010 자동 주입")
 
             # ══════════════════════════════════════════════════════════════════
             # ── PHASE C: header_field_control 생성 ─────────────────────────
@@ -1496,24 +1986,76 @@ class ThrooHybridEngine:
                         "msg": f"'{result_json.get('bizname','')}' 거래처로 자동 검색되었습니다. 맞는지 확인해 주세요." if _biz_st == "FUZZY" else "",
                     }
 
-            # ── ③ SI / CI (일반 매입·매출) ────────────────────────────────
-            elif _final_doctyp in ("SI", "CI"):
-                # 세금계산서 발행일: AI가 추출한 값이 있으면 EDITABLE, 없어도 EDITABLE(입력 유도)
-                _hfc["tax_invoice_date"] = {"status": "EDITABLE", "msg": ""}
-                # 세금코드: 백엔드가 이미 계산한 유효한 값(예: S010, P010)이 있으면 EDITABLE로 유지.
-                # LLM의 가짜 빈 값(" ", "-", "null" 등) 포함, 실질적으로 비어있으면 선택 필수.
+            # ── ③-A CI (매출전표) ─────────────────────────────────────────
+            elif _final_doctyp == "CI":
+                _is_advance = result_json.get("advance_payment", False)
+
+                if _is_advance:
+                    # 선수금(계약금): 아직 재화/용역 미제공 → 세금계산서 발행 시점 아님
+                    _hfc["tax_invoice_date"] = {
+                        "status": "DISABLED",
+                        "msg":    "선수금(계약금) 수령 시점은 세금계산서 발행 대상이 아닙니다.",
+                    }
+                    result_json["tax_invoice_date"] = ""
+                    # SX(매출-세금무관): DB 유무와 무관하게 항상 EDITABLE로 표시.
+                    # taxcd/taxnm은 PHASE 0-ADV에서 이미 세팅됨. 여기서는 field control만 반환.
+                    result_json.setdefault("taxcd", "SX")
+                    result_json.setdefault("taxnm", "세금무관")
+                    _hfc["taxcode"] = {
+                        "status": "EDITABLE",
+                        "msg":    "선수금은 세금무관(SX) 코드가 자동 설정되었습니다. 필요시 변경하세요.",
+                    }
+                    logger.info("[PHASE C][선수금] tax_invoice_date DISABLED, taxcode=SX EDITABLE 확정")
+                else:
+                    # 일반 매출전표: 세금계산서 발행일 입력 허용
+                    _hfc["tax_invoice_date"] = {"status": "EDITABLE", "msg": ""}
+                    # 세금코드: AI/매핑 결과에 유효한 값이 있으면 EDITABLE로 유지.
+                    # LLM의 가짜 빈 값(" ", "-", "null" 등) 포함, 실질적으로 비어있으면 선택 필수.
+                    _existing_taxcd = result_json.get("taxcd", "")
+                    if not self.is_empty_value(_existing_taxcd):
+                        _hfc["taxcode"] = {"status": "EDITABLE", "msg": ""}
+                    else:
+                        if _existing_taxcd != "":
+                            result_json["taxcd"] = ""
+                        _hfc["taxcode"] = {
+                            "status": "USER_SELECT_REQUIRED",
+                            "msg":    "매출 전표는 세금코드를 반드시 선택해주세요.",
+                        }
+                # 거래처: 매칭 상태에 따라 분기
+                _biz_status = result_json.get("biz_match_status", "NONE")
+                if _biz_status == "NONE" or not result_json.get("bizptcd"):
+                    _hfc["bizptcd"] = {
+                        "status": "REQUIRED_RED",
+                        "msg":    "등록된 거래처 정보를 찾을 수 없습니다. 새로운 거래처를 검색하거나 선택해 주세요.",
+                    }
+                elif _biz_status == "FUZZY":
+                    _hfc["bizptcd"] = {
+                        "status": "WARNING_YELLOW",
+                        "msg":    f"'{result_json.get('bizname','')}' 거래처가 검색되었습니다. 정확한 거래처인지 확인해 주세요.",
+                    }
+                else:
+                    _hfc["bizptcd"] = {"status": "EDITABLE", "msg": ""}
+
+            # ── ③-B SI (매입전표) ─────────────────────────────────────────
+            elif _final_doctyp == "SI":
+                # 매입전표: 세금계산서 발행일은 입력 대상이 아님 → DISABLED + 데이터 초기화
+                _hfc["tax_invoice_date"] = {
+                    "status": "DISABLED",
+                    "msg":    "매입전표(SI)는 세금계산서 발행일 입력 대상이 아닙니다.",
+                }
+                result_json["tax_invoice_date"] = ""
+                # 세금코드
                 _existing_taxcd = result_json.get("taxcd", "")
                 if not self.is_empty_value(_existing_taxcd):
                     _hfc["taxcode"] = {"status": "EDITABLE", "msg": ""}
                 else:
-                    # 가짜 빈 값이 있으면 실제 값도 깔끔하게 초기화
                     if _existing_taxcd != "":
                         result_json["taxcd"] = ""
                     _hfc["taxcode"] = {
                         "status": "USER_SELECT_REQUIRED",
-                        "msg":    "매입/매출 전표는 세금코드를 반드시 선택해주세요.",
+                        "msg":    "매입 전표는 세금코드를 반드시 선택해주세요.",
                     }
-                # 거래처: 매칭 상태에 따라 분기
+                # 거래처
                 _biz_status = result_json.get("biz_match_status", "NONE")
                 if _biz_status == "NONE" or not result_json.get("bizptcd"):
                     _hfc["bizptcd"] = {
@@ -1546,6 +2088,15 @@ class ThrooHybridEngine:
                 else:
                     _hfc["bizptcd"] = {"status": "EDITABLE", "msg": ""}
 
+            # ── mulky(멀티키) 제어: 선수금/선급금('A') 전표는 수정 불가 ─────────
+            if result_json.get("mulky") == "A":
+                _hfc["mulky"] = {
+                    "status": "DISABLED",
+                    "msg":    "선수금/선급금 전표는 멀티키를 변경할 수 없습니다.",
+                }
+            else:
+                _hfc["mulky"] = {"status": "EDITABLE", "msg": ""}
+
             result_json["header_field_control"] = _hfc
 
             # ══════════════════════════════════════════════════════════════════
@@ -1568,25 +2119,37 @@ class ThrooHybridEngine:
                 )
                 _has_valid_duedt = not self.is_empty_value(_raw_duedt)
 
+                _is_adv_line = (line.get("glmaster", "") == "215000")
+
                 if _gt in ("C", "S"):
                     line["due_date_enabled"] = True
                     if _has_valid_duedt:
-                        # AI가 유효한 만기일을 추출한 경우 → 값 유지, 편집 허용
                         line["duedt"] = _raw_duedt.strip()
                         _lfc["due_date"] = {
                             "status": "EDITABLE",
                             "msg":    "채권/채무 관리가 필요한 오픈아이템 계정입니다. 만기 일자를 확인해 주세요.",
                         }
                     else:
-                        # 만기일 없음(가짜 빈 값 포함) → 클렌징 후 사용자 입력 필수
                         line["duedt"] = ""
-                        line.pop("due_date", None)   # 가짜 빈 값 필드 제거
+                        line.pop("due_date", None)
                         _lfc["due_date"] = {
                             "status": "REQUIRED_RED",
                             "msg":    "채권/채무 관리가 필요한 '오픈아이템' 계정입니다. 정확한 만기 일자를 확인해 주세요.",
                         }
+                elif _is_adv_line:
+                    # ── 선수금(215000) 전용: 계약 이행 예정일 관리 ──────────────
+                    # 라인 루프(★)에서 이미 duedt를 채웠으므로 값 클렌징만 수행.
+                    # AI 추출값 없으면 전기일자가 이미 들어 있으므로 항상 EDITABLE.
+                    line["due_date_enabled"] = True
+                    _adv_duedt = line.get("duedt", "")
+                    if self.is_empty_value(_adv_duedt):
+                        _adv_duedt = result_json.get("date", "")
+                        line["duedt"] = _adv_duedt
+                    _lfc["due_date"] = {
+                        "status": "WARNING_YELLOW",
+                        "msg":    "계약 이행 예정일(만기일)을 확인해 주세요. 별도 언급이 없어 전기일자로 자동 설정되었습니다.",
+                    }
                 elif _gt == "A":
-                    # 자산 계정: 향후 확장 예정 (TODO)
                     line["duedt"]            = ""
                     line["due_date_enabled"] = False
                     _lfc["due_date"] = {"status": "DISABLED", "msg": ""}
@@ -1596,17 +2159,54 @@ class ThrooHybridEngine:
                     _lfc["due_date"] = {"status": "DISABLED", "msg": ""}
 
                 # ── account_code 제어 ─────────────────────────────────────────
-                # AR/AP 오픈아이템(C/S): 계정코드 임의 변경 금지 (서브레저 무결성 보호)
-                # 일반 계정: 자유 편집 가능
+                # ① AR/AP 오픈아이템(C/S): 계정코드 임의 변경 금지 (서브레저 무결성 보호)
+                # ② 선수금(biz_gl_locked): 215000으로 강제 고정된 라인은 편집 금지
+                # ③ 일반 계정: 자유 편집 가능
                 if _gt in ("C", "S"):
                     _lfc["account_code"] = {
                         "status": "DISABLED",
                         "msg":    "채권/채무 오픈아이템 계정은 서브레저 무결성 보호를 위해 변경할 수 없습니다.",
                     }
+                elif line.get("biz_gl_locked"):
+                    _lfc["account_code"] = {
+                        "status": "DISABLED",
+                        "msg":    "선수금(계약금) 대변 계정은 재화/용역 제공 전까지 변경할 수 없습니다.",
+                    }
                 else:
                     _lfc["account_code"] = {"status": "EDITABLE", "msg": ""}
 
                 line["line_field_control"] = _lfc
+
+            # ══════════════════════════════════════════════════════════════════
+            # ── PHASE E: 불공제('D') 분개 라인 재구성 ──────────────────────────
+            #
+            # txgubun='D'(매입불공제): 세액은 공제 불가 → 비용으로 전액 처리.
+            # - t_ctax에는 공급가·세액을 분리 기록 (supply_base / supply_vat 이용)
+            # - 분개 라인에서는 TAX 라인을 제거하고 EXP 차변 라인에 세액을 합산.
+            # - 결과: D(비용 = 공급가 + 세액), C(AP = 총액)  → 단일 비용 라인.
+            # ══════════════════════════════════════════════════════════════════
+            if txgubun == 'D' and vat > 0:
+                _tax_lines    = [l for l in result_json["lines"] if l.get("type") == "TAX"]
+                _nontax_lines = [l for l in result_json["lines"] if l.get("type") != "TAX"]
+                _tax_total    = sum(float(l.get("bizamt", 0)) for l in _tax_lines)
+                if _tax_total > 0:
+                    # 차변 EXP 첫 라인에 세액 합산 (공급가 + 불공제 VAT = 전액 비용화)
+                    for _l in _nontax_lines:
+                        if _l.get("debcre") == "D" and _l.get("type") == "EXP":
+                            _before = float(_l.get("bizamt", 0))
+                            _l["bizamt"] = round(_before + _tax_total, 0)
+                            _l["biztax"] = 0        # 불공제: 라인 세액 0
+                            _l["source"] = "규칙 반영"
+                            logger.info(
+                                f"[불공제(D) PHASE E] EXP 차변 합산: "
+                                f"{_before:,.0f} + {_tax_total:,.0f} = {_l['bizamt']:,.0f}"
+                            )
+                            break
+                    result_json["lines"] = _nontax_lines
+                    logger.info(
+                        f"[불공제(D) PHASE E] TAX 라인 {len(_tax_lines)}개 제거 완료 "
+                        f"| supply_base={base:,.0f} supply_vat={vat:,.0f} (t_ctax 분리 저장 예약)"
+                    )
 
             # ── 차대 불일치 감지 및 자동 보정 ───────────────────────────────
             lines_out = result_json.get("lines", [])

@@ -1,17 +1,32 @@
 # mainai.py
 import os, logging, json, jwt
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import AiParseRequest, JournalPostRequest
 from core.ai_engine import ThrooHybridEngine
 
+class ValidateMasterRequest(BaseModel):
+    type: str   # "glmaster" | "pctr" | "anakey"
+    value: str
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Throo_AI_System")
 
 router = APIRouter()
+
+def _q(value, places: str = '0.01') -> Decimal:
+    """회계 표준 반올림 헬퍼 (ROUND_HALF_UP).
+    places='1'   → 원(KRW) 단위 정수 반올림
+    places='0.01'→ 외화 환산금액 소수 2자리 반올림
+    float 부동소수점 오차를 방지하기 위해 str 경유 Decimal 변환을 사용한다.
+    """
+    return Decimal(str(value or 0)).quantize(Decimal(places), rounding=ROUND_HALF_UP)
+
 SECRET_KEY = "throo_super_secret_key_for_jwt"
 ALGORITHM = "HS256"
 
@@ -73,6 +88,61 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
         sys_entdt = now.strftime("%Y-%m-%d")
         sys_enttm = now.strftime("%H:%M:%S")
 
+        # ── 저장 전 필수 필드 공백 검증 (Phase A) ───────────────────────────
+        # 프론트 우회 저장 차단 — DB 조회 전에 먼저 값 존재 여부 확인
+        if not req.lines:
+            raise HTTPException(status_code=400, detail="저장할 분개 라인이 없습니다.")
+        for idx, line in enumerate(req.lines, 1):
+            if not (line.glmaster or "").strip():
+                raise HTTPException(status_code=400, detail=f"[{idx}번 라인] 계정코드가 없습니다.")
+            if (line.bizamt or 0) <= 0:
+                raise HTTPException(status_code=400, detail=f"[{idx}번 라인] 금액을 입력하세요.")
+            if not (line.pctrcd or "").strip():
+                raise HTTPException(status_code=400, detail=f"[{idx}번 라인] 부서(손익부서)가 없습니다.")
+            if not (line.anakey or "").strip():
+                raise HTTPException(status_code=400, detail=f"[{idx}번 라인] 관리항목이 없습니다.")
+            if (line.gltype or "").strip() in ("C", "S") and not (line.duedt or "").strip():
+                raise HTTPException(status_code=400, detail=f"[{idx}번 라인] 채권/채무 계정은 만기일자가 필수입니다.")
+
+        # ── 저장 전 마스터 데이터 이중 검증 (Phase B) ───────────────────────
+        # 프론트 경고를 무시하고 강제 저장하는 케이스까지 완전 차단
+        for idx, line in enumerate(req.lines, 1):
+            if line.glmaster:
+                row = db.execute(
+                    text("SELECT 1 FROM t_cglmst WHERE comcd=:c AND glmaster=:v LIMIT 1"),
+                    {"c": comcd, "v": line.glmaster}
+                ).fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"[{idx}번 라인] 계정코드 '{line.glmaster}'가 마스터에 존재하지 않습니다."
+                    )
+            if line.pctrcd:
+                row = db.execute(
+                    text("SELECT 1 FROM t_cprocos WHERE comcd=:c AND pctrcd=:v LIMIT 1"),
+                    {"c": comcd, "v": line.pctrcd}
+                ).fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"[{idx}번 라인] 손익부서 코드 '{line.pctrcd}'가 마스터에 존재하지 않습니다."
+                    )
+            if line.anakey:
+                row = db.execute(
+                    text("SELECT 1 FROM t_mbkey WHERE comcd=:c AND manaky=:v LIMIT 1"),
+                    {"c": comcd, "v": line.anakey}
+                ).fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"[{idx}번 라인] 관리항목 코드 '{line.anakey}'가 마스터에 존재하지 않습니다."
+                    )
+        # ── 검증 완료 ──────────────────────────────────────────────────────
+        # 검증 SELECT로 autobegin된 세션 트랜잭션을 명시적으로 종료한 뒤
+        # with db.begin()으로 쓰기 전용 새 트랜잭션을 시작한다.
+        # (SQLAlchemy 2.x autobegin 상태에서 db.begin() 호출 시 InvalidRequestError 방지)
+        db.rollback()
+
         with db.begin():
             # 1. 채번 (t_cdocnum) ─ 존재 확인 → tonum 범위 확인 → maxnum 증가
             docnum = db.execute(text(
@@ -103,12 +173,17 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                 )
             slipno = str(int(res[0]))
 
+            # 멀티키: 선수금('A') 등. 빈 문자열 방지를 위해 공백 1자리 보장.
+            _mulky = (req.mulky or " ").strip() or " "
+
             # 2. 헤더 저장 (t_lhead)
+            # ⚠️ t_lhead 스키마에는 mulky·taxcode 컬럼이 없음 → 포함 금지(UndefinedColumn 방지)
+            # mulky·taxcd는 라인 저장 시 body 테이블에만 기록한다.
             header_p = {
                 "c": comcd, "docno": slipno, "f": fisyr, "docty": req.doctyp[:2],
                 "invdt": req.docdate, "posdt": req.pstdate, "period": req.pstdate[5:7],
                 "trandt": req.trandt, "curren": req.currency[:3], "exrate": req.exrate,
-                "dstat": "N", "entdt": sys_entdt, "enttm": sys_enttm
+                "dstat": "N", "entdt": sys_entdt, "enttm": sys_enttm,
             }
             db.execute(text("""
                 INSERT INTO t_lhead (comcd, docno, fisyr, docty, invdt, posdt, period, trandt, curren, exrate, dstat, entdt, enttm) 
@@ -117,18 +192,19 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
 
             # 세무 계산용 타겟 변수
             target_side = 'C' if req.doctyp == 'CI' else 'D'
-            base_bizamt = sum(l.bizamt for l in req.lines if l.debcre == target_side and (not l.biztax or l.biztax == 0))
-            base_locamt = round(base_bizamt * req.exrate, 2)
-            
+            base_bizamt = sum(Decimal(str(l.bizamt)) for l in req.lines if l.debcre == target_side and (not l.biztax or l.biztax == 0))
+            _exrate     = Decimal(str(req.exrate))
+            base_locamt = _q(base_bizamt * _exrate)
+
             for idx, line in enumerate(req.lines):
                 p = {
                     "c": comcd, "f": fisyr, "s": slipno, "l": idx+1, "b": str(req.bizptcd).strip()[:10], 
                     "docty": req.doctyp[:2], "posdt": req.pstdate, "invdt": req.docdate, "curren": req.currency[:3], 
-                    "locamt": round(line.bizamt * req.exrate, 2), "loctax": round((line.biztax or 0) * req.exrate, 2), 
+                    "locamt": _q(Decimal(str(line.bizamt)) * _exrate), "loctax": _q(Decimal(str(line.biztax or 0)) * _exrate), 
                     "bizamt": line.bizamt, "biztax": line.biztax, "taxcd": req.taxcode[:10] if req.taxcode else "", 
                     "manaky": str(line.anakey).strip()[:8], "pctrcd": str(line.pctrcd).strip()[:10], 
                     "glmaster": str(line.glmaster).strip()[:10], 
-                    "mulky": " ", 
+                    "mulky": _mulky,
                     "debcre": line.debcre, "duedt": line.duedt or '1900-01-01', 
                     "bookey": ("C1" if req.doctyp=="CI" else "S1" if req.doctyp=="SI" else "GA"), 
                     "base_bizamt": base_bizamt, "base_locamt": base_locamt
@@ -140,15 +216,15 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                 # 4. 🌟 [확인] 일반원장 보조부 저장 (t_gbody_o)
                 db.execute(text("INSERT INTO t_gbody_o (comcd, glmaster, cscode, mulky, clrdt, clrdoc, fisyr, docno, lineno, docty, invdt, posdt, curren, bookey, debcre, pctrcd, bizamt, locamt, biztax, loctax, taxcd) VALUES (:c, :glmaster, :b, :mulky, '1900-01-01', '', :f, :s, :l, :docty, :invdt, :posdt, :curren, :bookey, :debcre, :pctrcd, :bizamt, :locamt, :biztax, :loctax, :taxcd)"), p)
                 
-                # 5. 거래처 보조부 저장 (t_cbody_o / t_sbody_o)
-                if req.doctyp == 'CI': 
+                # 5. 거래처 보조부 저장 — gltype 마스터값 기준 필터링
+                # 'C'(AR 고객 오픈아이템) → t_cbody_o 1줄
+                # 'S'(AP 공급업체 오픈아이템) → t_sbody_o 1줄
+                # 그 외(비용·세금·자산 등) → 건너뜀
+                _gltype = (line.gltype or "").strip()
+                if _gltype == 'C':
                     db.execute(text("INSERT INTO t_cbody_o (comcd, fisyr, docno, lineno, custcd, glmaster, mulky, clrdt, clrdoc, docty, invdt, posdt, curren, bookey, debcre, duedt, bizamt, locamt, taxcd) VALUES (:c, :f, :s, :l, :b, :glmaster, :mulky, '1900-01-01', '', :docty, :invdt, :posdt, :curren, :bookey, :debcre, :duedt, :bizamt, :locamt, :taxcd)"), p)
-                elif req.doctyp == 'SI': 
+                elif _gltype == 'S':
                     db.execute(text("INSERT INTO t_sbody_o (comcd, fisyr, docno, lineno, suppcd, glmaster, mulky, clrdt, clrdoc, docty, invdt, posdt, curren, bookey, debcre, duedt, bizamt, locamt, taxcd) VALUES (:c, :f, :s, :l, :b, :glmaster, :mulky, '1900-01-01', '', :docty, :invdt, :posdt, :curren, :bookey, :debcre, :duedt, :bizamt, :locamt, :taxcd)"), p)
-                
-                # 6. 🌟 [확인] 세무 데이터 저장 (t_ctax)
-                if line.biztax != 0: 
-                    db.execute(text("INSERT INTO t_ctax (comcd, fisyr, docno, lineno, taxcd, debcre, bizamt, locamt, biztax, loctax) VALUES (:c, :f, :s, :l, :taxcd, :debcre, :base_bizamt, :base_locamt, :biztax, :loctax)"), p)
                 
                 # 7. 월 합계 잔액 업데이트 (t_totlg)
                 db.execute(text(f"""
@@ -158,6 +234,63 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                     DO UPDATE SET trs{month_str} = t_totlg.trs{month_str} + EXCLUDED.trs{month_str}, loc{month_str} = t_totlg.loc{month_str} + EXCLUDED.loc{month_str}
                 """), p)
             
+            # ── t_ctax: 세금코드 존재 시 무조건 1건 저장 (lineno=0 헤더 레벨) ─────────
+            # 세금코드가 입력된 모든 전표에 세금 거래 기록을 남긴다.
+            # txgubun·supply_vat 조건으로 저장을 스킵하던 기존 로직 제거 → 무결성 보장.
+
+            # 1. 세금코드 정리
+            _taxcd_clean = (req.taxcode or "").split(' : ')[0].strip()[:10]
+
+            # 2. txgubun / taxtyp 파싱
+            #    프론트가 'txgubun|taxtyp|taxrate' 형식으로 전달하므로 파이프 분리
+            _raw_tx  = (req.txgubun or "").strip()
+            _parts   = _raw_tx.split('|')
+            _txgubun = _parts[0] if _parts else ""
+            _taxtyp  = _parts[1] if len(_parts) > 1 else ""
+
+            # 3. 정보 부족 시 DB 보완 (구버전 클라이언트 · txgubun 미전달 호환)
+            if _taxcd_clean and (not _txgubun or not _taxtyp):
+                _tg_row = db.execute(text("""
+                    SELECT n.txgubun, c.taxtyp
+                    FROM   t_ctxkey c
+                    LEFT JOIN t_ntxkey n ON c.taxcd = n.taxcd
+                    WHERE  c.comcd = :c AND c.taxcd = :t
+                    LIMIT  1
+                """), {"c": comcd, "t": _taxcd_clean}).fetchone()
+                if _tg_row:
+                    _txgubun = (_tg_row[0] or "").strip()
+                    _taxtyp  = (_tg_row[1] or "").strip()
+
+            # 4. 세금코드가 있으면 금액·구분 관계없이 무조건 INSERT
+            if _taxcd_clean:
+                _supply_base = Decimal(str(req.supply_base)) if req.supply_base is not None else base_bizamt
+                _supply_vat  = Decimal(str(req.supply_vat))  if req.supply_vat  is not None else Decimal('0')
+                _tax_debcre  = 'C' if req.doctyp == 'CI' else 'D'
+                db.execute(text("""
+                    INSERT INTO t_ctax
+                        (comcd, fisyr, docno, lineno, taxcd, debcre, taxtyp,
+                         srcdoc, srcyr, srclin, bizamt, locamt, biztax, loctax)
+                    VALUES
+                        (:c, :f, :s, 0, :taxcd, :debcre, :tt,
+                         '', 0, 0, :bizamt, :locamt, :biztax, :loctax)
+                """), {
+                    "c":      comcd,
+                    "f":      fisyr,
+                    "s":      slipno,
+                    "taxcd":  _taxcd_clean,
+                    "debcre": _tax_debcre,
+                    "tt":     _taxtyp,
+                    "bizamt": _supply_base,
+                    "locamt": _q(_supply_base * _exrate),
+                    "biztax": _supply_vat,
+                    "loctax": _q(_supply_vat  * _exrate),
+                })
+                logger.info(
+                    f"[t_ctax] 저장 성공: docno={slipno}, taxcd={_taxcd_clean}, "
+                    f"txgubun={_txgubun}, taxtyp={_taxtyp}, "
+                    f"bizamt={_supply_base:,.0f}, biztax={_supply_vat:,.0f}"
+                )
+
             # 8. 사용자 학습 데이터 저장 (UPSERT)
             # final_json 구조: {"lines": [...], "doctyp": "...", "modify_reason": "..."}
             # - lines      : 분개 라인 목록 (RAG 패턴 매칭 시 참조)
@@ -205,7 +338,13 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
                 db.rollback()
 
         return {"status": "success", "slipno": slipno}
+    except HTTPException:
+        # 마스터 검증 실패(400) 등 의도된 HTTP 에러는 그대로 상위로 전파
+        db.rollback()
+        raise
     except Exception as e:
+        # 예상치 못한 서버 오류 — 열려 있을 수 있는 트랜잭션을 안전하게 롤백
+        db.rollback()
         logger.error(f"Posting Error: {str(e)}")
         return {"status": "error", "message": str(e)}
 
@@ -248,6 +387,20 @@ async def get_bizpt_default_gl(bizptcd: str, db: Session = Depends(get_db), curr
 
     return {"suppgl": suppgl, "custgl": custgl, "suppgl_nm": suppgl_nm, "custgl_nm": custgl_nm}
 
+@router.post("/api/validate-master")
+async def validate_master(req: ValidateMasterRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """comcd는 JWT에서 추출 — 프론트에서 전달 불필요. type/value만 검증."""
+    comcd = current_user["comcd"]
+    _QUERIES = {
+        "glmaster": text("SELECT 1 FROM t_cglmst  WHERE comcd=:c AND glmaster=:v LIMIT 1"),
+        "pctr":     text("SELECT 1 FROM t_cprocos WHERE comcd=:c AND pctrcd=:v  LIMIT 1"),
+        "anakey":   text("SELECT 1 FROM t_mbkey   WHERE comcd=:c AND manaky=:v  LIMIT 1"),
+    }
+    if req.type not in _QUERIES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 검증 유형입니다: {req.type}")
+    row = db.execute(_QUERIES[req.type], {"c": comcd, "v": req.value}).fetchone()
+    return {"exists": bool(row)}
+
 @router.get("/api/search/{search_type}")
 async def master_search(search_type: str, q: str = "", db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     comcd = current_user["comcd"]
@@ -282,7 +435,12 @@ async def master_search(search_type: str, q: str = "", db: Session = Depends(get
     # 나머지 마스터: 기존 LIMIT 100으로 상향 (bizpt 등은 대규모 가능)
     sql_map = {
         "bizpt":   "SELECT bizptcd, bizname1, '' FROM t_cbizpt  WHERE comcd = :c AND (bizptcd  ILIKE :q OR bizname1 ILIKE :q) ORDER BY bizname1 LIMIT 100",
-        "taxkey":  "SELECT taxcd,   taxnm,   '' FROM t_ctxkey   WHERE comcd = :c AND (taxcd    ILIKE :q OR taxnm    ILIKE :q) ORDER BY taxcd    LIMIT 100",
+        # type 컬럼 = 'txgubun|taxtyp|taxrate' 형식으로 합산 전달
+        # · txgubun : 세금구분 코드 (1=일반, D=불공제, 2=영세, 3=면세)  — t_ntxkey
+        # · taxtyp  : AR/AP 방향 구분 ('S'=매출, 'P'=매입, 'D'=불공제매입) — t_ctxkey
+        # · taxrate : 실제 세율 숫자 (0, 10 등) — t_ctxkey
+        # 프론트에서 split('|')로 파싱하여 각각 사용
+        "taxkey":  "SELECT c.taxcd, c.taxnm, COALESCE(n.txgubun, '') || '|' || COALESCE(c.taxtyp, '') || '|' || COALESCE(c.taxrate, 0) FROM t_ctxkey c LEFT JOIN t_ntxkey n ON c.taxcd = n.taxcd WHERE c.comcd = :c AND (c.taxcd ILIKE :q OR c.taxnm ILIKE :q) ORDER BY c.taxcd LIMIT 100",
         "pctr":    "SELECT pctrcd,  prcrnm,  '' FROM t_cprocos  WHERE comcd = :c AND (pctrcd   ILIKE :q OR prcrnm   ILIKE :q) ORDER BY prcrnm   LIMIT 100",
         "anakey":  "SELECT manaky,  mananm,  '' FROM t_mbkey    WHERE comcd = :c AND (manaky   ILIKE :q OR mananm   ILIKE :q) ORDER BY mananm   LIMIT 100",
     }
