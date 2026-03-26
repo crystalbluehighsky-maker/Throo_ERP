@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>AI 전표 입력 시스템 v4.9</title>
+    <title>쓰루(Throo) AI 전표 입력 시스템</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -12,49 +12,20 @@
         .cell-input:focus { border-bottom-color: #6366f1; background: white; }
         .disabled-input { background-color: #f8fafc !important; cursor: not-allowed !important; color: #94a3b8 !important; pointer-events: none; }
         .modified-highlight { background-color: #fff1f2 !important; border: 2px solid #f43f5e !important; }
-        /* GL 전표 유형 선택 시 비활성화 필드 스타일 (라벨 포함 전체 그룹) */
         .gl-disabled { position: relative; }
-        /* ::after 오버레이: 클릭 차단 + cursor:not-allowed + 회색 배경을 동시에 처리
-           pointer-events:none 만으로는 브라우저가 cursor 스타일을 표시하지 않으므로 이 방식 사용 */
         .gl-disabled::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background-color: rgba(248, 249, 250, 0.82);
-            cursor: not-allowed;
-            z-index: 10;
-            border-radius: 8px;
+            content: ''; position: absolute; inset: 0; background-color: rgba(248, 249, 250, 0.82);
+            cursor: not-allowed; z-index: 10; border-radius: 8px;
         }
         .gl-disabled label { color: #94a3b8 !important; }
-        .gl-disabled input, .gl-disabled select, .gl-disabled button {
-            background-color: #f8f9fa !important;
-            color: #adb5bd !important;
-        }
-        /* 거래처 기본 계정 자동 입력 후 잠금 처리 (파란 계열 — AI 추론과 구분) */
-        .biz-gl-locked {
-            background-color: #eff6ff !important;
-            color: #1d4ed8 !important;
-            cursor: not-allowed !important;
-            pointer-events: none;
-            font-weight: 600;
-        }
-        .biz-gl-locked-btn {
-            background-color: #dbeafe !important;
-            color: #93c5fd !important;
-            cursor: not-allowed !important;
-            pointer-events: none;
-        }
-        /* pg_trgm FUZZY 매칭: 0.4 이상 0.9 미만 — 연한 황색으로 검증 권고 표시 */
-        .fuzzy-match {
-            background-color: #fffbeb !important;  /* amber-50 */
-            border-color: #fbbf24 !important;       /* amber-400 */
-            box-shadow: 0 0 0 1px #fcd34d;          /* amber-300 ring */
-        }
+        .gl-disabled input, .gl-disabled select, .gl-disabled button { background-color: #f8f9fa !important; color: #adb5bd !important; }
+        .biz-gl-locked { background-color: #eff6ff !important; color: #1d4ed8 !important; cursor: not-allowed !important; pointer-events: none; font-weight: 600; }
+        .biz-gl-locked-btn { background-color: #dbeafe !important; color: #93c5fd !important; cursor: not-allowed !important; pointer-events: none; }
+        .fuzzy-match { background-color: #fffbeb !important; border-color: #fbbf24 !important; box-shadow: 0 0 0 1px #fcd34d; }
     </style>
 </head>
 <body class="p-6">
     <div class="max-w-[1600px] mx-auto bg-white shadow-2xl rounded-2xl overflow-hidden border">
-        
         <div class="px-6 py-3 border-b bg-slate-50 flex items-center gap-4">
             <div class="flex items-center gap-2 w-full">
                 <span class="bg-amber-100 text-amber-700 px-3 py-1 rounded-md text-xs font-bold whitespace-nowrap"><i class="fa-solid fa-lightbulb"></i> 상황별 예제</span>
@@ -64,7 +35,6 @@
                     <option value="{{ key }}">{{ val.label }}</option>
                     {% endfor %}
                 </select>
-                <!-- 예제 텍스트 표시 영역 추가 -->
                 <span id="example-display" class="text-sm text-slate-800 font-bold flex-1 ml-2 border-l border-slate-300 pl-3 truncate"></span>
             </div>
         </div>
@@ -87,7 +57,6 @@
         <div class="p-6 border-b bg-white">
             <h3 class="font-bold text-indigo-800 text-sm mb-4 border-l-4 border-indigo-600 pl-2">전표 헤더 (Header Info)</h3>
             <div class="grid grid-cols-5 gap-6 text-[11px]">
-                
                 <div class="col-span-2" id="bizpt-group">
                     <label class="font-bold text-slate-500 mb-1 block">거래처코드 / 명</label>
                     <div class="flex border rounded-lg overflow-hidden" id="bizpt-container">
@@ -96,7 +65,6 @@
                         <input type="text" id="h-bizname" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
                     </div>
                 </div>
-
                 <div>
                     <label class="font-bold text-slate-500 mb-1 block">전표유형 / 전기일자</label>
                     <div class="flex gap-1">
@@ -110,12 +78,12 @@
                         <input type="text" id="h-currency" value="KRW" class="w-1/3 p-2 text-center border-r font-bold">
                         <input type="number" id="h-exrate" value="1" class="w-2/3 p-2 text-right" onchange="calculateAll()">
                     </div>
+                    <input type="hidden" id="h-local-currency" value="KRW">
                 </div>
                 <div>
                     <label class="font-bold text-slate-500 mb-1 block">분개수정 (사유)</label>
                     <select id="h-modify" class="w-full border p-2 rounded-lg cursor-pointer"><option value="">선택하세요</option><option value="POLICY">내부 규정</option><option value="ETC">기타</option></select>
                 </div>
-                
                 <div id="taxinfo-group">
                     <label class="font-bold text-slate-500 mb-1 block">세금코드</label>
                     <div class="flex border rounded-lg overflow-hidden" id="taxinfo-container">
@@ -123,15 +91,12 @@
                         <button onclick="openSearch('taxkey')" class="px-3 border-l bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
                     </div>
                 </div>
-                
                 <div id="taxdate-group"><label class="font-bold text-slate-500 mb-1 block">(세금)계산서 발행일</label><input type="date" id="h-taxdate" class="w-full border p-2 rounded-lg cursor-pointer"></div>
-                
                 <div><label class="font-bold text-slate-500 mb-1 block">멀티키(Mulky)</label><select id="h-mulky" class="w-full border p-2 rounded-lg bg-orange-50 text-orange-700 cursor-pointer"><option value=" "> </option><option value="A">A(선수/선급)</option></select></div>
-                
                 <div>
                     <label class="font-bold text-slate-500 mb-1 block">손익부서</label>
                     <div class="flex border rounded-lg overflow-hidden" id="pctr-container">
-                        <input type="text" id="h-pctrcd" class="w-1/3 p-2 font-mono bg-slate-50" readonly oninput="syncPctrToLines()">
+                        <input type="text" id="h-pctrcd" class="w-1/3 p-2 font-mono bg-slate-50" readonly>
                         <button onclick="openSearch('pctr')" class="px-3 border-x bg-slate-50 hover:bg-slate-200 cursor-pointer"><i class="fa-solid fa-magnifying-glass"></i></button>
                         <input type="text" id="h-pctrnm" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
                     </div>
@@ -144,16 +109,9 @@
                         <input type="text" id="h-ananm" class="w-2/3 p-2 outline-none bg-slate-50" readonly placeholder="필수 검색">
                     </div>
                 </div>
-
                 <div class="col-span-2 flex gap-4">
-                    <div class="w-1/2">
-                        <label class="font-bold text-slate-500 mb-1 block">증빙일자</label>
-                        <input type="date" id="h-docdate" class="w-full border p-2 rounded-lg cursor-pointer">
-                    </div>
-                    <div class="w-1/2">
-                        <label class="font-bold text-slate-500 mb-1 block">환산일자</label>
-                        <input type="date" id="h-transdt" class="w-full border p-2 rounded-lg cursor-pointer text-indigo-700 bg-indigo-50">
-                    </div>
+                    <div class="w-1/2"><label class="font-bold text-slate-500 mb-1 block">증빙일자</label><input type="date" id="h-docdate" class="w-full border p-2 rounded-lg"></div>
+                    <div class="w-1/2"><label class="font-bold text-slate-500 mb-1 block">환산일자</label><input type="date" id="h-transdt" class="w-full border p-2 rounded-lg text-indigo-700 bg-indigo-50" onchange="onTransDtChange()"></div>
                 </div>
                 <div class="col-span-3"><label class="font-bold text-slate-500 mb-1 block">적요</label><input type="text" id="h-text" class="w-full border p-2 rounded-lg" placeholder="전표 전체 적요를 입력하세요."></div>
             </div>
@@ -163,14 +121,14 @@
             <div class="flex justify-between items-center mb-4">
                 <h3 class="font-bold text-indigo-800 text-sm border-l-4 border-indigo-600 pl-2">분개 상세 내역 (Line Items)</h3>
                 <div class="flex gap-2">
-                    <button onclick="addNewLine()" class="bg-indigo-50 text-indigo-600 px-4 py-1 rounded-full border border-indigo-200 text-[11px] font-bold hover:bg-indigo-100 cursor-pointer">+ 라인추가</button>
-                    <button onclick="deleteSelected()" class="bg-rose-50 text-rose-600 px-4 py-1 rounded-full border border-rose-200 text-[11px] font-bold hover:bg-rose-100 cursor-pointer">- 라인삭제</button>
+                    <button onclick="addNewLine()" class="bg-indigo-50 text-indigo-600 px-4 py-1 rounded-full border border-indigo-200 text-[11px] font-bold hover:bg-indigo-100">+ 라인추가</button>
+                    <button onclick="deleteSelected()" class="bg-rose-50 text-rose-600 px-4 py-1 rounded-full border border-rose-200 text-[11px] font-bold hover:bg-rose-100">- 라인삭제</button>
                 </div>
             </div>
             <div class="overflow-x-auto border border-slate-200 rounded-xl shadow-sm bg-white max-h-[400px]">
                 <table class="w-full text-[11px] text-left whitespace-nowrap">
                     <thead class="bg-slate-100 sticky top-0 font-bold border-b text-slate-600">
-                        <tr><th class="p-3 w-12 text-center">No</th><th class="p-3 w-20">구분</th><th class="p-3 w-40">계정코드</th><th class="p-3 w-40">계정명</th><th class="p-3 text-right w-36">거래통화금액</th><th class="p-3 text-right w-36">로컬금액(KRW)</th><th class="p-3 w-28">부서</th><th class="p-3 w-28">항목</th><th class="p-3 w-28">만기일</th><th class="p-3">적요</th><th class="p-3 w-24 text-center">출처</th></tr>
+                        <tr><th class="p-3 w-12 text-center">No</th><th class="p-3 w-20">구분</th><th class="p-3 w-40">계정코드</th><th class="p-3 w-40">계정명</th><th class="p-3 text-right w-36">거래통화금액</th><th class="p-3 text-right w-36">로컬금액(KRW)</th><th class="p-3 w-28">부서</th><th class="p-3 w-28">관리항목</th><th class="p-3 w-28">만기일</th><th class="p-3">적요</th><th class="p-3 w-24 text-center">출처</th></tr>
                     </thead>
                     <tbody id="journal-tbody" class="divide-y divide-slate-100"></tbody>
                 </table>
@@ -187,201 +145,83 @@
         <div class="bg-white w-[500px] rounded-2xl shadow-2xl overflow-hidden">
             <div class="p-4 bg-slate-100 border-b flex justify-between items-center font-bold">
                 <span>마스터 데이터 검색</span>
-                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 text-lg cursor-pointer">✕</button>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-800 text-lg">✕</button>
             </div>
             <div class="p-4 flex gap-2 bg-white">
                 <input type="text" id="modal-query" class="flex-1 border p-3 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="검색어 입력..." onkeydown="if(event.key==='Enter') executeSearch()">
-                <button onclick="executeSearch()" class="bg-indigo-600 text-white px-5 rounded-lg text-sm font-bold hover:bg-indigo-700 cursor-pointer">검색</button>
+                <button onclick="executeSearch()" class="bg-indigo-600 text-white px-5 rounded-lg text-sm font-bold hover:bg-indigo-700">검색</button>
             </div>
             <div id="modal-results" class="max-h-[520px] overflow-y-auto p-2 bg-slate-50"></div>
         </div>
     </div>
 
-    <!-- 서버에서 전달받은 예제 데이터: type="application/json"으로 분리하면 JS 린터가 Jinja2 문법을 파싱하지 않음 -->
     <script type="application/json" id="examples-data">{{ examples | tojson | safe }}</script>
 
     <script>
         const API_BASE = "/api";
         const examples = JSON.parse(document.getElementById('examples-data').textContent);
         let isManualEdit = false, selectedRow = null, currentSearchType = "", activeLineBtn = null, currentPatternId = null, currentMatchScore = null;
-        // aiSnapshot: renderLines() 호출 시 AI 제안값 원본을 저장 (수정 감지 기준점)
-        // 형식: [{debcre, glmaster, amt}, ...] — 핵심 3개 필드만 추적
         let aiSnapshot = [];
 
-        /** 분개수정 사유 필드를 완전 초기화 (값·스타일·required 모두 해제) */
-        function resetModifyField() {
-            const el = document.getElementById('h-modify');
-            if (!el) return;
-            el.value = '';
-            el.classList.remove('modified-highlight');
-            el.removeAttribute('required');
-        }
-
-        function onExampleChange() {
-            const val = document.getElementById('example-select').value;
-            const displayEl = document.getElementById('example-display');
-            if (val && examples[val]) {
-                displayEl.textContent = examples[val].text;
-                displayEl.title = examples[val].text;
-            } else {
-                displayEl.textContent = "";
-                displayEl.title = "";
-            }
-        }
-
-        // t_v_std_pattern에서 학습된 패턴 목록을 가져와 드롭다운에 동적 추가
-        async function loadDbPatterns() {
-            try {
-                const res = await fetch(`${API_BASE}/patterns`);
-                if (!res.ok) return;
-                const patterns = await res.json();
-                if (!Array.isArray(patterns) || patterns.length === 0) return;
-
-                const sel = document.getElementById('example-select');
-                const sep = document.createElement('option');
-                sep.disabled = true;
-                sep.textContent = '─── 학습된 DB 패턴 ───';
-                sel.appendChild(sep);
-
-                patterns.forEach(p => {
-                    const key = `db_${p.id}`;
-                    // 동일한 examples 맵에 추가하여 onExampleChange()가 그대로 동작
-                    examples[key] = { label: p.pattern_nm, text: p.example_tx || '' };
-                    const opt = document.createElement('option');
-                    opt.value = key;
-                    opt.textContent = `${p.pattern_nm}${p.docty ? ' (' + p.docty + ')' : ''}`;
-                    sel.appendChild(opt);
-                });
-            } catch (e) {
-                console.warn('DB 패턴 로드 실패:', e);
-            }
-        }
-
-        /** 버튼 상태 머신: idle(AI 분개) → loading(분석 중...) → done(재분석) → idle(취소 시) */
-        function setBtnState(state) {
-            const btn = document.getElementById('btn-ai-parse');
-            const txt = document.getElementById('ai-text');
-            if (state === 'loading') {
-                btn.disabled = true;
-                txt.innerText = '분석 중...';
-            } else if (state === 'done') {
-                btn.disabled = false;
-                txt.innerHTML = '<i class="fa-solid fa-rotate-right mr-1"></i>재분석';
-            } else {  // idle
-                btn.disabled = false;
-                txt.innerHTML = 'AI 분개';
-            }
-        }
-
-        /** 헤더 하이라이트 클래스(빨강·노랑) 전체 초기화 — 재분석 시 잔상 제거용 */
-        function resetHeaderHighlights() {
-            ['bizpt-container', 'pctr-container', 'anakey-container', 'taxinfo-container'].forEach(id => {
-                document.getElementById(id)?.classList.remove(
-                    'border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50', 'fuzzy-match'
-                );
-            });
-        }
+        function resetModifyField() { const el = document.getElementById('h-modify'); if (!el) return; el.value = ''; el.classList.remove('modified-highlight'); el.removeAttribute('required'); }
+        function onExampleChange() { const val = document.getElementById('example-select').value; const d = document.getElementById('example-display'); if (val && examples[val]) { d.textContent = examples[val].text; d.title = examples[val].text; } else { d.textContent = ""; d.title = ""; } }
+        async function loadDbPatterns() { try { const res = await fetch(`${API_BASE}/patterns`); if (!res.ok) return; const patterns = await res.json(); const sel = document.getElementById('example-select'); if (patterns.length > 0) { const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '─── 학습된 DB 패턴 ───'; sel.appendChild(sep); patterns.forEach(p => { const key = `db_${p.id}`; examples[key] = { label: p.pattern_nm, text: p.example_tx || '' }; const opt = document.createElement('option'); opt.value = key; opt.textContent = `${p.pattern_nm}${p.docty ? ' (' + p.docty + ')' : ''}`; sel.appendChild(opt); }); } } catch (e) { console.warn('DB 패턴 로드 실패:', e); } }
+        function setBtnState(state) { const btn = document.getElementById('btn-ai-parse'); const txt = document.getElementById('ai-text'); if (state === 'loading') { btn.disabled = true; txt.innerText = '분석 중...'; } else if (state === 'done') { btn.disabled = false; txt.innerHTML = '<i class="fa-solid fa-rotate-right mr-1"></i>재분석'; } else { btn.disabled = false; txt.innerHTML = 'AI 분개'; } }
+        function resetHeaderHighlights() { ['bizpt-container', 'pctr-container', 'anakey-container', 'taxinfo-container'].forEach(id => { document.getElementById(id)?.classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50', 'fuzzy-match'); }); }
 
         async function onAiParse() {
-            const text = document.getElementById('ai-input').value;
-            if(!text) return alert("내용을 입력하세요.");
-
-            // ── 이전 분석 결과 초기화 (재분석 시 잔상 방지) ──────────────────
-            document.getElementById('journal-tbody').innerHTML = '';
-            resetHeaderHighlights();
-            // 헤더 입력 필드 값 초기화 (날짜·거래처·세금코드·부서·항목)
-            ['h-bizptcd','h-bizname','h-taxinfo','h-taxdate',
-             'h-pctrcd','h-pctrnm','h-anakey','h-ananm'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-            // 재분석 시 수정 상태 초기화 (이전 빨간 테두리 잔상 방지)
-            aiSnapshot   = [];
-            isManualEdit = false;
-            resetModifyField();
-
-            setBtnState('loading');
+            const text = document.getElementById('ai-input').value; if(!text) return alert("내용을 입력하세요.");
+            document.getElementById('journal-tbody').innerHTML = ''; resetHeaderHighlights();
+            ['h-bizptcd','h-bizname','h-taxinfo','h-taxdate','h-pctrcd','h-pctrnm','h-anakey','h-ananm'].forEach(id => { const el = document.getElementById(id); if (el) { el.value = ''; if(el.dataset) { el.dataset.supplyBase = '0'; el.dataset.supplyVat = '0'; el.dataset.taxrate = ''; el.dataset.txgubun = ''; } } });
+            // 멀티키(h-mulky) 초기화 및 이전 전표에서 걸린 disabled 해제
+            const _mulkyEl = document.getElementById('h-mulky'); if (_mulkyEl) { _mulkyEl.value = ' '; _mulkyEl.disabled = false; _mulkyEl.classList.remove('opacity-50','cursor-not-allowed','bg-slate-100'); }
+            aiSnapshot = []; isManualEdit = false; resetModifyField(); setBtnState('loading');
             try {
-                let res = await fetch(`${API_BASE}/ai-parse`, { 
-                    method: 'POST', headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ user_id: "USER01", natural_text: text }) 
-                });
+                let res = await fetch(`${API_BASE}/ai-parse`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: "USER01", natural_text: text }) });
                 if(res.status === 401) { window.top.location.href = '/login'; return; }
                 const data = await res.json();
                 if(res.ok && data.status === 'success') {
-                    currentPatternId  = data.pattern_id || null;
-                    currentMatchScore = data.parsed_entities.match_score ?? null;
-                    fillHeader(data.parsed_entities);
-                    renderLines(data.recommended_pattern, data.parsed_entities.total_amount, data.parsed_entities.due_date, data.parsed_entities.source);
-                    setBtnState('done');  // 성공: "재분석" 상태로 전환
-                    // 백엔드 차대 불일치 경고가 있으면 즉시 사용자에게 안내
-                    if (data.parsed_entities.balance_warning) {
-                        setTimeout(() => alert('⚠️ ' + data.parsed_entities.balance_warning), 200);
-                    }
-                } else { 
-                    alert("분석 실패: " + (data.message || "서버 오류")); 
-                    setBtnState('idle');  // 실패: 초기 상태 복원
-                }
-            } catch (err) { 
-                alert("서버 연결 실패."); 
-                setBtnState('idle');
-            }
-            // ※ finally 블록 없음 — 성공/실패별로 명확히 상태를 분기 처리
+                    currentPatternId = data.pattern_id || null; currentMatchScore = data.parsed_entities.match_score ?? null;
+                    fillHeader(data.parsed_entities); renderLines(data.recommended_pattern, data.parsed_entities.total_amount, data.parsed_entities.due_date, data.parsed_entities.source);
+                    setBtnState('done'); if (data.parsed_entities.balance_warning) setTimeout(() => alert('⚠️ ' + data.parsed_entities.balance_warning), 200);
+                } else { alert("분석 실패: " + (data.message || "서버 오류")); setBtnState('idle'); }
+            } catch (err) { alert("서버 연결 실패."); setBtnState('idle'); }
         }
 
-        /** 취소: 입력창·분개 내역 초기화 + 헤더 필드 초기화 + 버튼 Idle 복원 */
         function onCancel() {
-            // 입력창 초기화
-            document.getElementById('ai-input').value = '';
-            document.getElementById('journal-tbody').innerHTML = '';
-
-            // 헤더 필드 일괄 초기화
-            ['h-pstdate','h-docdate','h-transdt','h-text',
-             'h-bizptcd','h-bizname','h-taxinfo','h-taxdate',
-             'h-pctrcd','h-pctrnm','h-anakey','h-ananm'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-
-            // 빨간 테두리 + FUZZY 강조 동시 제거 (공통 함수 재사용)
-            resetHeaderHighlights();
-
-            // 전표유형 초기화 및 GL 비활성화 상태 재정비
-            document.getElementById('h-doctyp').value = 'CI';
-            onDoctypChange();
-
-            // 합계 표시 초기화
-            calculateAll();
-
-            // ── 분개수정 사유 및 수정 상태 완전 초기화 ───────────────────────
-            resetModifyField();   // 값·스타일·required 해제
-            aiSnapshot    = [];   // AI 원본 스냅샷 폐기
-            isManualEdit  = false;
-
-            // 상태 변수 초기화
-            currentPatternId  = null;
-            currentMatchScore = null;
-
-            // 버튼 Idle 복원
-            setBtnState('idle');
+            document.getElementById('ai-input').value = ''; document.getElementById('journal-tbody').innerHTML = ''; resetHeaderHighlights();
+            ['h-pstdate','h-docdate','h-transdt','h-text','h-bizptcd','h-bizname','h-taxinfo','h-taxdate','h-pctrcd','h-pctrnm','h-anakey','h-ananm'].forEach(id => { const el = document.getElementById(id); if (el) { el.value = ''; if(el.dataset) { el.dataset.supplyBase = '0'; el.dataset.supplyVat = '0'; el.dataset.taxrate = ''; el.dataset.txgubun = ''; } } });
+            // 멀티키 초기화 + 잠금 해제
+            const _cm = document.getElementById('h-mulky'); if (_cm) { _cm.value = ' '; _cm.disabled = false; _cm.classList.remove('opacity-50','cursor-not-allowed','bg-slate-100'); _cm.title = ''; }
+            document.getElementById('h-doctyp').value = 'CI'; onDoctypChange(); calculateAll(); resetModifyField(); aiSnapshot = []; isManualEdit = false; currentPatternId = null; currentMatchScore = null; setBtnState('idle');
         }
 
-        function syncDates() {
-            const pst = document.getElementById('h-pstdate').value;
-            if(pst) document.getElementById('h-transdt').value = pst;
+        function syncDates() { const pst = document.getElementById('h-pstdate').value; if(pst) document.getElementById('h-transdt').value = pst; }
+        function syncPctrToLines() { const val = document.getElementById('h-pctrcd').value; document.querySelectorAll('.line-pctr').forEach(input => { if (input.dataset.isManual !== 'true') input.value = val; }); markEdit(); }
+        function syncAnaToLines() { const val = document.getElementById('h-anakey').value; document.querySelectorAll('.line-anakey').forEach(input => { if (input.dataset.isManual !== 'true') input.value = val; }); markEdit(); }
+
+        function setManualLock(input) {
+            input.dataset.isManual = 'true';
+            input.classList.add('bg-yellow-50');
+        }
+        function clearManualLock(input, headerVal) {
+            input.dataset.isManual = 'false';
+            input.classList.remove('bg-yellow-50');
+            input.value = headerVal;
+            markEdit();
         }
 
         function onDoctypChange() {
             const doctyp = document.getElementById('h-doctyp').value;
             const isGL   = doctyp === 'GL';
+            const isSI   = doctyp === 'SI';
 
-            // 라벨 포함 전체 필드 그룹에 .gl-disabled 토글 (시각적으로 완전히 비활성화/활성화)
             ['bizpt-group', 'taxinfo-group', 'taxdate-group'].forEach(id => {
                 document.getElementById(id).classList.toggle('gl-disabled', isGL);
             });
 
             if (isGL) {
-                // GL 전환: 빨간 테두리 제거 + 값 초기화
+                // GL: 거래처·세금코드·발행일 전체 초기화 및 비활성
                 document.getElementById('bizpt-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
                 document.getElementById('taxinfo-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50');
                 document.getElementById('h-bizptcd').value = '';
@@ -389,169 +229,84 @@
                 document.getElementById('h-taxinfo').value = '';
                 document.getElementById('h-taxdate').value = '';
             } else {
-                // CI/SI 전환: gl-disabled 완전 제거 + 내부 input/button/select 명시적 활성화
+                // CI / SI 공통: 그룹 전체 활성화 후 유형별 추가 제어
                 ['bizpt-group', 'taxinfo-group', 'taxdate-group'].forEach(id => {
                     const el = document.getElementById(id);
                     el.classList.remove('gl-disabled');
-                    // ★ 보장: 하위 요소에 남아있는 disabled 속성도 해제
                     el.querySelectorAll('input, select, button').forEach(inp => {
                         inp.disabled = false;
                         inp.classList.remove('disabled-input');
                     });
                 });
+
+                // SI(매입): 세금계산서 발행일은 입력 대상이 아님 → 초기화 및 비활성
+                if (isSI) {
+                    const taxDateEl = document.getElementById('h-taxdate');
+                    taxDateEl.value = '';
+                    taxDateEl.classList.add('disabled-input');
+                    taxDateEl.disabled = true;
+                }
             }
         }
 
         function renderLines(p, t, dueDate, source = "") {
-            const b = document.getElementById('journal-tbody');
-            // 기존 행 전체 제거 — innerHTML='' 로 행 내부 bg-amber-50 등 row 스타일도 함께 소멸
-            // ※ resetHeaderHighlights()는 여기서 호출하지 않는다.
-            //   fillHeader() 직후에 renderLines()가 호출되므로, 여기서 호출하면
-            //   fillHeader()가 방금 적용한 FUZZY·빨강 강조가 즉시 지워지는 역효과 발생.
-            b.innerHTML = '';
-            const lines = p || [];
-            const total = parseFloat(t) || 0;
-            const doctyp = document.getElementById('h-doctyp').value;
-            
-            const hasTaxLine = lines.some(l => l.type === 'TAX');
-            let s = total, v = 0;
-            if (hasTaxLine) { s = Math.round(total / 1.1); v = total - s; }
-
-            const currentPctr = document.getElementById('h-pctrcd').value;
-            const currentAna = document.getElementById('h-anakey').value;
-
-            lines.forEach((l) => {
-                // 1순위: 백엔드가 계산해 준 개별 금액(bizamt)이 있으면 그대로 사용
-                const serverAmt = parseFloat(l.bizamt) || 0;
-                let amt;
-                if (serverAmt > 0) {
-                    amt = serverAmt;
-                } else {
-                    // 2순위: 서버 금액이 없거나 0이면 기존 total 기반 안분 로직 사용
-                    amt = total;
-                    if (l.type === 'TAX') amt = v;
-                    else if (l.type === 'REV' || (doctyp === 'SI' && l.type === 'EXP')) amt = s;
-                    else if (l.type === 'EXP') amt = (hasTaxLine ? s : total);
-                }
-
-                l._calcAmt = amt;
-                if(!l.pctrcd) l.pctrcd = currentPctr;
-                if(!l.anakey) l.anakey = currentAna;
-            });
-
-            lines.sort((a, b) => {
-                if (b._calcAmt !== a._calcAmt) return b._calcAmt - a._calcAmt; 
-                const glA = a.glmaster || "999999";
-                const glB = b.glmaster || "999999";
-                return glA.localeCompare(glB);
-            });
-
+            const b = document.getElementById('journal-tbody'); b.innerHTML = ''; const lines = p || []; const total = parseFloat(t) || 0; const doctyp = document.getElementById('h-doctyp').value;
+            const hasTaxLine = lines.some(l => l.type === 'TAX'); let s = total, v = 0; if (hasTaxLine) { s = Math.round(total / 1.1); v = total - s; }
+            const currentPctr = document.getElementById('h-pctrcd').value; const currentAna = document.getElementById('h-anakey').value;
+            lines.forEach((l) => { const serverAmt = parseFloat(l.bizamt) || 0; let amt; if (serverAmt > 0) amt = serverAmt; else { amt = total; if (l.type === 'TAX') amt = v; else if (l.type === 'REV' || (doctyp === 'SI' && (l.type === 'EXP' || l.type === 'COG'))) amt = s; else if (l.type === 'EXP' || l.type === 'COG') amt = (hasTaxLine ? s : total); } l._calcAmt = amt; l.pctrcd = currentPctr || l.pctrcd || ''; l.anakey = currentAna || l.anakey || ''; });
+            lines.sort((a, b) => { if (b._calcAmt !== a._calcAmt) return b._calcAmt - a._calcAmt; return (a.glmaster || "999999").localeCompare(b.glmaster || "999999"); });
             lines.forEach((l, i) => { b.appendChild(createRow(i+1, l, l._calcAmt, dueDate, source)); });
-            calculateAll();
-
-            // ── AI 원본값 스냅샷 저장 (수정 감지 기준점) ──────────────────────
-            // debcre·glmaster·amt 3개 필드만 추적: 이 값이 변경되면 사유 선택 필수화
-            aiSnapshot = lines.map(l => ({
-                debcre:   l.debcre   || 'D',
-                glmaster: l.glmaster || '',
-                amt:      l._calcAmt || 0,
-            }));
-            // 스냅샷 저장 직후 수정 상태 해제 (재분석 시 이전 빨간 테두리 잔상 제거)
-            isManualEdit = false;
-            resetModifyField();
+            calculateAll(); aiSnapshot = lines.map(l => ({ debcre: l.debcre || 'D', glmaster: l.glmaster || '', amt: l._calcAmt || 0 })); isManualEdit = false; resetModifyField();
         }
 
         function createRow(no, line={}, amt=0, dueDate='', source='') {
-            const tr = document.createElement('tr');
-            if (line.type)   tr.dataset.aiType = line.type;
-            if (line.type === 'TAX') tr.dataset.isTax = "Y";
-            // gltype 저장: 만기일 Hard Block 검증에서 C/S 판별에 사용
-            if (line.gltype) tr.dataset.gltype = line.gltype;
-
-            // 만기일 활성화 조건:
-            // 1순위: line_field_control.due_date.status (REQUIRED_RED → 활성, DISABLED → 비활성)
-            // 2순위: due_date_enabled 플래그
-            // 3순위: gltype C/S 기준 (레거시 폴백)
+            const tr = document.createElement('tr'); if (line.type) tr.dataset.aiType = line.type; if (line.type === 'TAX') tr.dataset.isTax = "Y"; if (line.gltype) tr.dataset.gltype = line.gltype;
             const _dueLfc = (line.line_field_control || {}).due_date;
-            let isDue;
-            if (_dueLfc) {
-                isDue = (_dueLfc.status === 'REQUIRED_RED' || _dueLfc.status === 'EDITABLE');
-            } else {
-                isDue = (line.due_date_enabled === true) || (line.gltype === 'C' || line.gltype === 'S');
-            }
+            let isDue = _dueLfc
+                ? (_dueLfc.status === 'REQUIRED_RED' || _dueLfc.status === 'EDITABLE' || _dueLfc.status === 'WARNING_YELLOW')
+                : (line.due_date_enabled === true || line.gltype === 'C' || line.gltype === 'S');
             const dueClass    = isDue ? '' : 'disabled-input';
             const dueDisabled = isDue ? '' : 'disabled';
-            const dueTitle    = _dueLfc ? (_dueLfc.msg || '') : '';
             const finalDueDate = isDue ? (line.duedt || dueDate || '') : '';
-
-            // Intent Override 라인: 행 전체 황색 하이라이트 (계정이 변경되었음을 시각적으로 안내)
-            if (line.intent_override) {
-                tr.classList.add('bg-amber-50');
-                tr.style.borderLeft = '3px solid #fbbf24';  // amber-400
-            }
-
-            // 계정코드 잠금 여부 결정:
-            // 1순위: line_field_control.account_code.status === 'DISABLED' (C/S 오픈아이템 무결성 보호)
-            // 2순위: biz_gl_locked (거래처 기본 계정 자동매핑)
-            const _acctLfc       = (line.line_field_control || {}).account_code;
-            const isOpenItemLock = _acctLfc && _acctLfc.status === 'DISABLED';
-            const isBizGlLocked  = !!line.biz_gl_locked;
-            const isGlLocked     = isOpenItemLock || isBizGlLocked;
-
-            if (isGlLocked) tr.dataset.glLocked = 'true';
-            if (isOpenItemLock) {
-                // 오픈아이템 잠금: 빨간 테두리 없이 회색으로 잠금 표시
-                tr.dataset.openItemLocked = 'true';
-            }
-            const glInputClass  = isGlLocked ? 'biz-gl-locked' : '';
-            const glNameClass   = isGlLocked ? 'biz-gl-locked' : 'text-slate-500';
-            const glBtnClass    = isGlLocked ? 'biz-gl-locked-btn' : 'bg-slate-50 hover:bg-slate-200 cursor-pointer';
-            const glBtnDisabled = isGlLocked ? 'disabled' : '';
-            const glBtnTitle    = isOpenItemLock ? (_acctLfc.msg || '계정 변경 불가') : '';
-
+            // WARNING_YELLOW: 자동 입력 상태 → fuzzy-match 클래스로 노란 테두리, title로 안내
+            const dueWarnClass = (_dueLfc && _dueLfc.status === 'WARNING_YELLOW') ? ' fuzzy-match' : '';
+            const dueTitle     = (_dueLfc && _dueLfc.msg) ? _dueLfc.msg : '';
+            if (line.intent_override) { tr.classList.add('bg-amber-50'); tr.style.borderLeft = '3px solid #fbbf24'; }
+            const _acctLfc = (line.line_field_control || {}).account_code; const isOpenItemLock = _acctLfc && _acctLfc.status === 'DISABLED'; const isBizGlLocked = !!line.biz_gl_locked; const isGlLocked = isOpenItemLock || isBizGlLocked; if (isGlLocked) tr.dataset.glLocked = 'true';
+            const glInputClass = isGlLocked ? 'biz-gl-locked' : ''; const glNameClass = isGlLocked ? 'biz-gl-locked' : 'text-slate-500'; const glBtnClass = isGlLocked ? 'biz-gl-locked-btn' : 'bg-slate-50 hover:bg-slate-200 cursor-pointer'; const glBtnDisabled = isGlLocked ? 'disabled' : '';
             const glBoxClass = line.glname ? 'bg-white' : 'bg-red-50 border-red-500 ring-1 ring-red-500';
-
-            // 출처 배지: 라인 수준 source 우선 → 헤더 수준 source 폴백
-            // "DB"      → 파란색  '패턴 참조'  (Vector DB 또는 t_cglmst 텍스트 검색 일치)
-            // "규칙 반영" → 주황색  '규칙 반영'  (STEP4 강제 주입 / AR수금폴백 하드코딩)
-            // "AI"      → 보라색  'AI 추론'    (Gemini 순수 추론, DB/규칙 미적용)
-            // intent_override → 노란색 '의도 반영' (시맨틱 Intent GL 검색으로 계정 교체)
-            // 레거시 호환: "FALLBACK" / "시스템 규칙" / "RULE" → '규칙 반영' 처리
             const lineSrc = line.source || source;
             let sourceBadge = '';
             if (line.intent_override) {
-                sourceBadge = `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">
-                    <i class="fa-solid fa-bullseye text-[9px]"></i> 의도 반영
-                </span>`;
-            } else if (lineSrc === '규칙 반영' || lineSrc === 'FALLBACK' || lineSrc === '시스템 규칙' || lineSrc === 'RULE') {
-                sourceBadge = `<span class="inline-flex items-center gap-1 bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">
-                    <i class="fa-solid fa-triangle-exclamation text-[9px]"></i> 규칙 반영
-                </span>`;
+                sourceBadge = `<span class="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap"><i class="fa-solid fa-bullseye"></i> 의도 반영</span>`;
+            } else if (['규칙 반영', '시스템 규칙', 'RULE'].includes(lineSrc)) {
+                sourceBadge = `<span class="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap"><i class="fa-solid fa-triangle-exclamation"></i> 규칙 반영</span>`;
             } else if (lineSrc === 'DB') {
-                sourceBadge = `<span class="inline-flex items-center gap-1 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">
-                    <i class="fa-solid fa-database text-[9px]"></i> 패턴 참조
-                </span>`;
+                sourceBadge = `<span class="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap"><i class="fa-solid fa-database"></i> 패턴 참조</span>`;
+            } else if (lineSrc === 'FB' || lineSrc === 'FALLBACK') {
+                sourceBadge = `<span class="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap"><i class="fa-solid fa-magnifying-glass"></i> 계정 참조</span>`;
             } else if (lineSrc === 'AI') {
-                sourceBadge = `<span class="inline-flex items-center gap-1 bg-violet-100 text-violet-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">
-                    <i class="fa-solid fa-wand-magic-sparkles text-[9px]"></i> AI 추론
-                </span>`;
+                sourceBadge = `<span class="bg-violet-100 text-violet-700 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 추론</span>`;
             }
-            
+
             tr.innerHTML = `
-                <td class="p-3 text-center text-slate-400 font-mono cursor-pointer">${no}</td>
+                <td class="p-3 text-center text-slate-400 font-mono">${no}</td>
                 <td class="p-2"><select class="side-select cell-input cursor-pointer" onchange="markEdit(); calculateAll()"><option value="D" ${line.debcre==='D'?'selected':''}>차변</option><option value="C" ${line.debcre==='C'?'selected':''}>대변</option></select></td>
-                <td class="p-2">
-                    <div class="flex border rounded overflow-hidden ${glBoxClass} gl-container">
-                        <input type="text" class="cell-input font-mono line-gl w-full border-none ${glInputClass}" value="${line.glmaster||''}" readonly>
-                        <button onclick="openSearch('glmaster', this)" class="px-2 border-l text-slate-500 ${glBtnClass}" ${glBtnDisabled} title="${glBtnTitle}"><i class="fa-solid fa-magnifying-glass"></i></button>
-                    </div>
-                </td>
+                <td class="p-2"><div class="flex border rounded overflow-hidden ${glBoxClass} gl-container"><input type="text" class="cell-input font-mono line-gl w-full border-none ${glInputClass}" value="${line.glmaster||''}" readonly><button onclick="openSearch('glmaster', this)" class="px-2 border-l text-slate-500 ${glBtnClass}" ${glBtnDisabled}><i class="fa-solid fa-magnifying-glass"></i></button></div></td>
                 <td class="p-2"><input type="text" class="cell-input line-glname ${glNameClass}" value="${line.glname||''}" readonly placeholder="계정 검색 필요"></td>
                 <td class="p-2"><input type="text" class="cell-input text-right amt-input font-bold" value="${amt.toLocaleString()}" onkeyup="this.value=Number(this.value.replace(/\\D/g,'')).toLocaleString(); calculateAll(); markEdit();"></td>
                 <td class="p-3 text-right font-bold loc-amt-display text-slate-500">0</td>
-                <td class="p-2"><input type="text" class="cell-input line-pctr" value="${line.pctrcd||''}" oninput="markEdit()"></td>
-                <td class="p-2"><input type="text" class="cell-input line-anakey" value="${line.anakey||''}" oninput="markEdit()"></td>
-                <td class="p-2"><input type="date" class="cell-input line-duedt ${dueClass} cursor-pointer" value="${finalDueDate}" ${dueDisabled} title="${dueTitle}" onchange="markEdit()"></td>
+                <td class="p-2"><div class="flex border rounded overflow-hidden"><input type="text" class="cell-input line-pctr w-full border-none" value="${line.pctrcd||''}"
+                    oninput="setManualLock(this); markEdit();"
+                    ondblclick="clearManualLock(this, document.getElementById('h-pctrcd').value);"
+                    onblur="if(!this.value){ clearManualLock(this, document.getElementById('h-pctrcd').value); } else { checkMasterExistence('pctr', this.value, this); }"
+                    ><button onclick="openSearch('pctr', this)" class="px-2 border-l bg-slate-50 hover:bg-slate-200 cursor-pointer text-slate-500"><i class="fa-solid fa-magnifying-glass"></i></button></div></td>
+                <td class="p-2"><div class="flex border rounded overflow-hidden"><input type="text" class="cell-input line-anakey w-full border-none" value="${line.anakey||''}"
+                    oninput="setManualLock(this); markEdit();"
+                    ondblclick="clearManualLock(this, document.getElementById('h-anakey').value);"
+                    onblur="if(!this.value){ clearManualLock(this, document.getElementById('h-anakey').value); } else { checkMasterExistence('anakey', this.value, this); }"
+                    ><button onclick="openSearch('anakey', this)" class="px-2 border-l bg-slate-50 hover:bg-slate-200 cursor-pointer text-slate-500"><i class="fa-solid fa-magnifying-glass"></i></button></div></td>
+                <td class="p-2"><input type="date" class="cell-input line-duedt ${dueClass}${dueWarnClass}" value="${finalDueDate}" ${dueDisabled} title="${dueTitle}" onchange="markEdit()"></td>
                 <td class="p-2"><input type="text" class="cell-input line-text" value="${line.text||''}" oninput="markEdit()"></td>
                 <td class="p-2 text-center">${sourceBadge}</td>
             `;
@@ -559,54 +314,40 @@
             return tr;
         }
 
-        function addNewLine() { 
-            const b = document.getElementById('journal-tbody');
-            b.appendChild(createRow(b.children.length+1, { pctrcd: document.getElementById('h-pctrcd').value, anakey: document.getElementById('h-anakey').value })); 
-            calculateAll(); markEdit();
-        }
-
+        function addNewLine() { const b = document.getElementById('journal-tbody'); b.appendChild(createRow(b.children.length+1, { pctrcd: document.getElementById('h-pctrcd').value, anakey: document.getElementById('h-anakey').value })); calculateAll(); markEdit(); }
         function deleteSelected() { if(selectedRow) selectedRow.remove(); calculateAll(); markEdit(); }
-        /**
-         * markEdit: 분개 라인 변경 시 호출.
-         * aiSnapshot(AI 원본값)과 현재 행들을 비교하여 실제 수정 여부를 판단한다.
-         * - 수정이 있으면: isManualEdit=true, h-modify 빨간 테두리 + required
-         * - 원본과 동일하게 되돌리면: 수정 상태 자동 해제 (빨간 테두리 제거, value 초기화)
-         */
-        function markEdit() {
-            const rows = Array.from(document.querySelectorAll('#journal-tbody tr'));
+        function markEdit() { const rows = Array.from(document.querySelectorAll('#journal-tbody tr')); if (aiSnapshot.length === 0) { isManualEdit = true; const el = document.getElementById('h-modify'); el.classList.add('modified-highlight'); el.setAttribute('required', 'required'); return; } const isDiff = rows.length !== aiSnapshot.length || rows.some((tr, i) => { const snap = aiSnapshot[i]; return (tr.querySelector('.side-select')?.value || '') !== snap.debcre || (tr.querySelector('.line-gl')?.value || '') !== snap.glmaster || Math.abs((parseFloat((tr.querySelector('.amt-input')?.value || '0').replace(/,/g, '')) || 0) - snap.amt) > 0; }); const modEl = document.getElementById('h-modify'); if (isDiff) { isManualEdit = true; modEl.classList.add('modified-highlight'); modEl.setAttribute('required', 'required'); } else { isManualEdit = false; modEl.value = ''; modEl.classList.remove('modified-highlight'); modEl.removeAttribute('required'); } }
 
-            // 스냅샷 없음(AI 미분석 상태에서 수동 라인 추가 등) → 무조건 편집 상태
-            if (aiSnapshot.length === 0) {
-                isManualEdit = true;
-                const el = document.getElementById('h-modify');
-                el.classList.add('modified-highlight');
-                el.setAttribute('required', 'required');
+        /**
+         * 환산일자(#h-transdt) 변경 시 t_nexrate에서 환율을 실시간 재조회.
+         * - 동일 통화(srccur === tarcur)면 환율을 1로 고정하고 종료.
+         * - 외화 거래라면 API를 호출해 h-exrate를 업데이트하고 calculateAll() 실행.
+         */
+        async function onTransDtChange() {
+            const localCur = (document.getElementById('h-local-currency').value || 'KRW').toUpperCase().trim();
+            const txCur    = (document.getElementById('h-currency').value     || localCur).toUpperCase().trim();
+            const txDate   = document.getElementById('h-transdt').value;
+
+            if (txCur === localCur) {
+                document.getElementById('h-exrate').value = 1;
+                calculateAll();
                 return;
             }
 
-            // 행 수 차이 또는 핵심 필드(차/대변·계정코드·금액) 불일치 → 편집 상태
-            const isDiff = rows.length !== aiSnapshot.length || rows.some((tr, i) => {
-                const snap     = aiSnapshot[i];
-                const debcre   = tr.querySelector('.side-select')?.value || '';
-                const glmaster = tr.querySelector('.line-gl')?.value    || '';
-                const amt      = parseFloat((tr.querySelector('.amt-input')?.value || '0').replace(/,/g, '')) || 0;
-                return debcre !== snap.debcre
-                    || glmaster !== snap.glmaster
-                    || Math.abs(amt - snap.amt) > 0;
-            });
+            if (!txDate) return;
 
-            const modEl = document.getElementById('h-modify');
-            if (isDiff) {
-                isManualEdit = true;
-                modEl.classList.add('modified-highlight');
-                modEl.setAttribute('required', 'required');
-            } else {
-                // ★ 되돌림 감지: 원본과 동일 → 수정 상태 완전 해제
-                isManualEdit = false;
-                modEl.value  = '';
-                modEl.classList.remove('modified-highlight');
-                modEl.removeAttribute('required');
+            try {
+                const res  = await fetch(
+                    `${API_BASE}/exrate?srccur=${encodeURIComponent(txCur)}&tarcur=${encodeURIComponent(localCur)}&target_date=${encodeURIComponent(txDate)}`
+                );
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                document.getElementById('h-exrate').value = data.exrate ?? 1;
+                if (!data.found) console.warn(`[환율조회] 데이터 없음: ${txCur}/${localCur} as-of ${txDate}`);
+            } catch (e) {
+                console.warn('[환율조회 실패]', e);
             }
+            calculateAll();
         }
 
         function calculateAll() {
@@ -618,355 +359,379 @@
             });
             document.getElementById('sum-debit').innerHTML = `차변합: <span class="text-blue-400 ml-1">${dSum.toLocaleString()}</span>`;
             document.getElementById('sum-credit').innerHTML = `대변합: <span class="text-rose-400 ml-1">${cSum.toLocaleString()}</span>`;
-            const diff = dSum - cSum;
-            document.getElementById('sum-diff').textContent = `차이: ${diff.toLocaleString()}`;
-            document.getElementById('sum-diff').className = diff === 0 ? "text-green-400" : "text-yellow-400";
+            const diff = dSum - cSum; const d = document.getElementById('sum-diff'); d.textContent = `차이: ${diff.toLocaleString()}`; d.className = diff === 0 ? "text-green-400" : "text-yellow-400";
             return diff === 0;
+        }
+
+        /**
+         * 세금코드 선택 시 분개 라인 금액 재계산
+         * @param {string} taxcd    - 세금코드
+         * @param {string} taxnm    - 세금코드명
+         * @param {string} txgubun  - 세금구분 ('1'=일반, 'D'=불공제, '2'/'3'=영세/면세)
+         * @param {number} taxrate  - 실제 세율 숫자 (0, 10 등). DB t_ctxkey.taxrate 값.
+         *
+         * ─ 계산 원칙 ─
+         * taxrate > 0 && txgubun === '1' → 1/(1+taxrate%) 안분, TAX 라인 생성/유지
+         * taxrate > 0 && txgubun === 'D' → 불공제: 전액 비용, TAX 라인 제거
+         * taxrate === 0                  → 부가세 없음: 전액 비용, TAX 라인 삭제
+         */
+        function onTaxCodeSelected(taxcd, taxnm, txgubun, taxrate) {
+            taxrate = parseFloat(taxrate) || 0;
+
+            const rows = Array.from(document.querySelectorAll('#journal-tbody tr'));
+            if (rows.length === 0) return;
+
+            // 기준 합계 금액 산출 (AR/AP 라인 우선, 없으면 해당 차대변 합)
+            let total = 0;
+            for (const tr of rows) {
+                const aiType = (tr.dataset.aiType || '').toUpperCase();
+                if (aiType === 'AR' || aiType === 'AP') {
+                    total = parseFloat(tr.querySelector('.amt-input')?.value?.replace(/,/g, '') || '0') || 0;
+                    break;
+                }
+            }
+            if (total <= 0) {
+                const side = document.getElementById('h-doctyp').value === 'CI' ? 'D' : 'C';
+                rows.forEach(tr => {
+                    if ((tr.querySelector('.side-select')?.value || '') === side)
+                        total += parseFloat(tr.querySelector('.amt-input')?.value?.replace(/,/g, '') || '0') || 0;
+                });
+            }
+            if (total <= 0) return;
+
+            // ── 공급가 / 부가세 계산 ─────────────────────────────────────────
+            // taxrate > 0 && 일반과세(1): AI/백엔드 AMOUNT_EXTRACTION_RULES와 동기화
+            //   공급가 = Math.round(총액 / (1 + taxrate/100))
+            // 그 외(불공제·면세·taxrate=0): 총액 = 공급가, 부가세 = 0
+            const isNormalVat = (txgubun === '1' && taxrate > 0);
+            const base = isNormalVat ? Math.round(total / (1 + taxrate / 100)) : total;
+            const vat  = isNormalVat ? (total - base) : 0;
+
+            const hTax = document.getElementById('h-taxinfo');
+            hTax.dataset.supplyBase = base;
+            hTax.dataset.supplyVat  = vat;
+
+            // ── 기존 라인 업데이트 ────────────────────────────────────────────
+            // 부가세 라인 판별 기준:
+            //   ① tr.dataset.isTax === 'Y'  (렌더링 시 세팅된 플래그)
+            //   ② 계정코드가 '213000'(매입부가세) 또는 '214000'(매출부가세)
+            // 중복 방지: 첫 번째 부가세 라인만 금액 갱신, 나머지는 tr.remove()로 제거
+            let hasTaxLine = false;
+            rows.forEach(tr => {
+                const aiType   = (tr.dataset.aiType || '').toUpperCase();
+                const amtInput = tr.querySelector('.amt-input');
+                const glCode   = (tr.querySelector('.line-gl')?.value || '').trim();
+                const isTaxRow = tr.dataset.isTax === 'Y'
+                              || glCode === '213000'
+                              || glCode === '214000';
+
+                if (isTaxRow) {
+                    if (!isNormalVat || vat === 0) {
+                        tr.remove();   // taxrate=0·불공제 → TAX 라인 전체 삭제
+                    } else if (!hasTaxLine) {
+                        // 첫 번째 부가세 라인만 금액 갱신
+                        amtInput.value = vat.toLocaleString();
+                        hasTaxLine = true;
+                    } else {
+                        // 두 번째 이상 중복 부가세 라인 → 제거(차대 합계 어긋남 방지)
+                        tr.remove();
+                    }
+                } else if (aiType === 'EXP' || aiType === 'REV' || aiType === 'COG') {
+                    // 불공제(D)이면서 세율 있음 → 전액 비용; 그 외 → 공급가
+                    amtInput.value = (txgubun === 'D' && taxrate > 0 ? total : base).toLocaleString();
+                }
+            });
+
+            // ── 부가세 라인 신규 생성 (일반과세 & 세액 > 0 & 라인 없을 때만) ──
+            if (isNormalVat && vat > 0 && !hasTaxLine) {
+                const b     = document.getElementById('journal-tbody');
+                const isCI  = document.getElementById('h-doctyp').value === 'CI';
+                const taxLine = {
+                    debcre: isCI ? 'C' : 'D',
+                    glmaster: isCI ? '214000' : '213000',
+                    glname:   isCI ? '매출부가세' : '매입부가세',
+                    gltype: 'X', type: 'TAX', source: '규칙 반영'
+                };
+                b.appendChild(createRow(b.children.length + 1, taxLine, vat));
+            }
+
+            calculateAll(); markEdit();
+        }
+
+        /**
+         * 마스터 테이블 실시간 존재 여부 검증
+         * comcd는 서버에서 JWT 세션으로 자동 확인 — 프론트에서 전달 불필요
+         * @param {string} type  - "glmaster" | "pctr" | "anakey"
+         * @param {string} value - 검증할 코드 값
+         * @param {HTMLElement} element - 오류 표시를 붙일 input 요소
+         * @returns {Promise<boolean>} 존재하면 true, 없으면 false (input 초기화 포함)
+         */
+        async function checkMasterExistence(type, value, element) {
+            if (!value) return true;
+            try {
+                const res = await fetch(`${API_BASE}/validate-master`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type, value })
+                });
+                if (!res.ok) return true; // 서버 오류 시 통과 (저장 시 이중 검증으로 차단)
+                const data = await res.json();
+                if (!data.exists) {
+                    const MSG = {
+                        glmaster: `계정코드 '${value}'는 마스터에 존재하지 않습니다.`,
+                        pctr:     `손익부서 코드 '${value}'는 마스터에 존재하지 않습니다.`,
+                        anakey:   `관리항목 코드 '${value}'는 마스터에 존재하지 않습니다.`,
+                    };
+                    alert(MSG[type] || "존재하지 않는 코드입니다.");
+                    element.classList.add('border-red-500', 'bg-red-50');
+                    element.value = "";
+                    return false;
+                }
+                element.classList.remove('border-red-500', 'bg-red-50');
+                return true;
+            } catch {
+                return true; // 네트워크 오류 시 통과
+            }
         }
 
         async function onPostJournal() {
             if(!calculateAll()) return alert("차변/대변 합계가 일치하지 않습니다.");
-            
-            const isGL      = document.getElementById('h-doctyp').value === 'GL';
-            const reqBizpt  = document.getElementById('h-bizptcd').value;
-            const reqAnakey = document.getElementById('h-anakey').value;
-            const reqTax    = document.getElementById('h-taxinfo').value;
-            const reqPctr   = document.getElementById('h-pctrcd').value;
-
-            // ── 분개 수정 사유 필수 검증 (특허 P26LX017 — 수정 의도 데이터 수집) ──
-            // isManualEdit: markEdit() 호출 시 true로 설정 (계정·금액·만기일 등 변경 감지)
-            if (isManualEdit) {
-                const modifyEl = document.getElementById('h-modify');
-                if (!modifyEl.value) {
-                    alert("분개 수정 사유를 반드시 선택해야 전표 저장이 가능합니다.");
-                    // h-modify 필드에 포커스 + 시각적 강조 유지
-                    modifyEl.classList.add('modified-highlight');
-                    modifyEl.focus();
-                    return;   // ★ API 호출 완전 차단
-                }
-            }
-
-            // GL은 거래처·세금코드 불필요, CI/SI는 전체 필수
-            const missingCommon = !reqAnakey || !reqPctr;
-            const missingCiSi   = !isGL && (!reqBizpt || !reqTax);
-            if (missingCommon || missingCiSi) {
-                const msg = isGL
-                    ? "빨간색으로 표시된 필수 항목(손익부서, 관리항목)을 검색하여 채워주세요."
-                    : "빨간색으로 표시된 필수 항목(거래처, 손익부서, 관리항목, 세금코드)을 검색하여 채워주세요.";
-                return alert(msg);
-            }
-            
-            let invalidGl = false;
-            document.querySelectorAll('.line-glname').forEach(el => { if(!el.value) invalidGl = true; });
-            if(invalidGl) return alert("빨간색으로 표시된 계정코드를 검색하여 정확히 입력해주세요.");
-
-            // ── [Hard Block] 오픈아이템 라인 만기일자 필수 검증 ─────────────
-            // gltype이 C(고객) 또는 S(공급업체)인 라인은 만기일(duedt)이 반드시 있어야 함
+            const isGL = document.getElementById('h-doctyp').value === 'GL'; const reqBizpt = document.getElementById('h-bizptcd').value; const reqAnakey = document.getElementById('h-anakey').value; const reqTax = document.getElementById('h-taxinfo').value; const reqPctr = document.getElementById('h-pctrcd').value;
+            if (isManualEdit && !document.getElementById('h-modify').value) { alert("분개 수정 사유를 반드시 선택해야 합니다."); return; }
+            if ((!isGL && (!reqBizpt || !reqTax)) || !reqAnakey || !reqPctr) return alert("필수 항목을 모두 채워주세요.");
             const rows = Array.from(document.querySelectorAll('#journal-tbody tr'));
-            for (const tr of rows) {
-                const gltype = tr.dataset.gltype || '';
-                if (gltype === 'C' || gltype === 'S') {
-                    const duedtVal = tr.querySelector('.line-duedt')?.value || '';
-                    if (!duedtVal) {
-                        const glname = tr.querySelector('.line-glname')?.value || '오픈아이템';
-                        alert(`[필수] "${glname}" 계정은 오픈아이템 계정입니다.\n만기일자를 반드시 입력해주세요.`);
-                        tr.querySelector('.line-duedt')?.focus();
-                        return;
-                    }
+            for (let i = 0; i < rows.length; i++) {
+                const tr     = rows[i];
+                const rowNo  = i + 1;
+                const glmaster = tr.querySelector('.line-gl').value;
+                const gltype   = tr.dataset.gltype || '';
+                const bizamt   = parseFloat(tr.querySelector('.amt-input').value.replace(/,/g, '')) || 0;
+                const pctr     = tr.querySelector('.line-pctr').value;
+                const ana      = tr.querySelector('.line-anakey').value;
+                const duedt    = tr.querySelector('.line-duedt')?.value || '';
+
+                if (!glmaster)  return alert(`${rowNo}번 라인의 계정코드가 없습니다.`);
+                if (bizamt <= 0) return alert(`${rowNo}번 라인의 금액을 입력하세요.`);
+                if (!pctr)      return alert(`${rowNo}번 라인의 부서(손익부서)가 없습니다.`);
+                if (!ana)       return alert(`${rowNo}번 라인의 관리항목이 없습니다.`);
+                if ((gltype === 'C' || gltype === 'S') && !duedt) {
+                    return alert(`${rowNo}번 라인은 채권/채무 계정이므로 만기일자가 필수입니다.`);
                 }
             }
-
-            // ── [Soft Warning] CI 전표 세금계산서 발행일 미입력 확인 ─────────
-            const doctyp     = document.getElementById('h-doctyp').value;
-            const taxInvDate = document.getElementById('h-taxdate').value;
-            if (doctyp === 'CI' && !taxInvDate) {
-                // 부가세 라인이 존재하는지 확인
-                const hasTaxLine = rows.some(tr => tr.dataset.isTax === 'Y' &&
-                    (parseFloat(tr.querySelector('.amt-input')?.value?.replace(/,/g,'')) || 0) > 0);
-                if (hasTaxLine) {
-                    const proceed = confirm(
-                        "세금계산서 발행일이 빠져있는데 전표저장하시겠습니까?\n\n" +
-                        "[예] 저장 진행  /  [취소] 입력 후 저장"
-                    );
-                    if (!proceed) {
-                        document.getElementById('h-taxdate').focus();
-                        return;
-                    }
-                }
-            }
-
-            const pstdateEl = document.getElementById('h-pstdate').value;
             
-            // 💡 수정: payload 키 값을 trandt로 변경
+            const hTax = document.getElementById('h-taxinfo');
             const postData = { 
-                user_id: "USER01", pattern_id: currentPatternId, bizptcd: reqBizpt, doctyp: document.getElementById('h-doctyp').value, 
-                pstdate: pstdateEl, docdate: document.getElementById('h-docdate').value || pstdateEl, 
-                trandt: document.getElementById('h-transdt').value || pstdateEl, 
-                currency: document.getElementById('h-currency').value, exrate: parseFloat(document.getElementById('h-exrate').value), 
-                taxcode: reqTax.split(' : ')[0], modify_reason: document.getElementById('h-modify').value, raw_text: document.getElementById('ai-input').value, match_score: currentMatchScore, 
-                lines: Array.from(document.querySelectorAll('#journal-tbody tr')).map(tr => ({ 
-                    debcre: tr.querySelector('.side-select').value, glmaster: tr.querySelector('.line-gl').value, bizamt: parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0, biztax: tr.dataset.isTax === "Y" ? (parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0) : 0, pctrcd: tr.querySelector('.line-pctr').value, anakey: tr.querySelector('.line-anakey').value, duedt: tr.querySelector('.line-duedt').value, text: tr.querySelector('.line-text').value 
+                user_id: "USER01", bizptcd: reqBizpt, doctyp: document.getElementById('h-doctyp').value, 
+                pstdate: document.getElementById('h-pstdate').value, docdate: document.getElementById('h-docdate').value, 
+                trandt: document.getElementById('h-transdt').value, currency: document.getElementById('h-currency').value, 
+                exrate: parseFloat(document.getElementById('h-exrate').value), taxcode: reqTax.split(' : ')[0], 
+                modify_reason: document.getElementById('h-modify').value, raw_text: document.getElementById('ai-input').value, 
+                supply_base: parseFloat(hTax.dataset.supplyBase || '0'), 
+                supply_vat: parseFloat(hTax.dataset.supplyVat || '0'), 
+                txgubun: hTax.dataset.txgubun || '',
+                mulky: (document.getElementById('h-mulky')?.value || ' ').trim() || ' ', 
+                lines: rows.map(tr => ({ 
+                    debcre:   tr.querySelector('.side-select').value, 
+                    glmaster: tr.querySelector('.line-gl').value, 
+                    gltype:   tr.dataset.gltype || '',
+                    bizamt:   parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0, 
+                    biztax:   (tr.dataset.isTax === 'Y' || ['213000','214000'].includes((tr.querySelector('.line-gl')?.value||'').trim()))
+                              ? (parseFloat(tr.querySelector('.amt-input').value.replace(/,/g,'')) || 0) : 0,
+                    pctrcd:   tr.querySelector('.line-pctr').value, 
+                    anakey:   tr.querySelector('.line-anakey').value, 
+                    duedt:    tr.querySelector('.line-duedt').value, 
+                    text:     tr.querySelector('.line-text').value 
                 })) 
             };
-
-            try {
-                let res = await fetch(`${API_BASE}/journal-entries`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(postData) });
-                const data = await res.json();
-                if(data.status === 'success') {
-                    // 전표 저장 성공 → 수정 상태·스냅샷 완전 초기화 후 페이지 리로드
-                    resetModifyField();
-                    aiSnapshot   = [];
-                    isManualEdit = false;
-                    alert(`전표번호: ${data.slipno} 생성 완료`);
-                    location.reload();
-                }
-                else { alert(`저장 실패: ${data.message}`); }
+            try { 
+                let res = await fetch(`${API_BASE}/journal-entries`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(postData) }); 
+                const data = await res.json(); 
+                if(data.status === 'success') { alert(`전표번호: ${data.slipno} 생성 완료`); location.reload(); } 
+                else alert(`저장 실패: ${data.message || data.detail || JSON.stringify(data)}`);
             } catch (err) { alert(`오류 발생: ${err.message}`); }
         }
 
-        /**
-         * applyFieldControl(elementId, fc, containerSuffix)
-         * 백엔드 field_control 객체를 받아 입력 필드에 CSS 상태를 적용하는 헬퍼.
-         * @param {string}  fieldId   - 대상 input/select 엘리먼트 ID
-         * @param {string}  containerId - 테두리를 입힐 컨테이너 엘리먼트 ID (없으면 null)
-         * @param {object}  fc        - { status, msg } — 백엔드 field_control 객체
-         */
-        function applyFieldControl(fieldId, containerId, fc) {
-            const el  = document.getElementById(fieldId);
-            const box = containerId ? document.getElementById(containerId) : null;
-            if (!fc) return;
-
-            // 모든 상태 클래스 초기화
-            const allCls = ['border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match','disabled-input'];
-            if (box) box.classList.remove(...allCls);
-            if (el)  { el.classList.remove(...allCls); el.disabled = false; }
-
-            switch (fc.status) {
-                case 'REQUIRED_RED':
-                    // 컨테이너가 있으면 컨테이너에, 없으면(단독 input이면) input 자체에 직접 빨간 테두리 적용
-                    if (box) { box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
-                    else if (el) { el.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
-                    if (el) el.title = fc.msg || '';
-                    break;
-                case 'WARNING_YELLOW':
-                    if (box) box.classList.add('fuzzy-match');
-                    else if (el) el.classList.add('fuzzy-match');
-                    if (el) el.title = fc.msg || '';
-                    break;
-                case 'DISABLED':
-                    if (el) { el.disabled = true; el.value = ''; el.classList.add('disabled-input'); el.title = fc.msg || ''; }
-                    break;
-                case 'USER_SELECT_REQUIRED':
-                    // 컨테이너와 input 양쪽 모두 빨간 테두리
-                    if (box) { box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); }
-                    if (el)  { el.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); el.value = ''; el.title = fc.msg || ''; }
-                    break;
-                // 'EDITABLE': 이미 초기화 완료 — 추가 처리 없음
-            }
-        }
-
-        function fillHeader(e) {
-            // 새 데이터로 덮어쓰기 전 하이라이트 전체 초기화 (잔상 제거)
-            resetHeaderHighlights();
-            const today = new Date().toISOString().split('T')[0];
+        function applyFieldControl(fieldId, containerId, fc) { const el = document.getElementById(fieldId); const box = containerId ? document.getElementById(containerId) : null; if (!fc) return; const allCls = ['border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match','disabled-input']; if (box) box.classList.remove(...allCls); if (el) { el.classList.remove(...allCls); el.disabled = false; } switch (fc.status) { case 'REQUIRED_RED': if (box) box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); break; case 'WARNING_YELLOW': if (box) box.classList.add('fuzzy-match'); break; case 'DISABLED': if (el) { el.disabled = true; el.value = ''; el.classList.add('disabled-input'); } break; case 'USER_SELECT_REQUIRED': if (box) box.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); if (el) el.value = ''; break; } }
+        
+        function fillHeader(e) { 
+            resetHeaderHighlights(); 
+            const today = new Date().toISOString().split('T')[0]; 
             document.getElementById('h-pstdate').value = e.date || today; 
-            document.getElementById('h-transdt').value = e.date || today;
-            document.getElementById('h-doctyp').value  = e.doctyp || 'GL';
-            document.getElementById('h-docdate').value = e.date || today;
-            document.getElementById('h-text').value    = e.text || document.getElementById('ai-input').value.substring(0, 50);
-
-            // doctyp 반영 후 GL 여부에 따라 관련 필드 활성화/비활성화
-            onDoctypChange();
-            const isGL = document.getElementById('h-doctyp').value === 'GL';
-
-            // ── header_field_control 우선 처리 ─────────────────────────────
-            // 백엔드가 field_control 객체를 내려준 경우 이를 기반으로 UI 상태 결정.
-            // 없으면 기존 biz_match_status 등 레거시 필드로 폴백.
-            const hfc = e.header_field_control || {};
-
-            // ── 세금계산서 발행일 ────────────────────────────────────────────
-            // 1) 백엔드 tax_invoice_date 값을 먼저 채운다 (DISABLED면 applyFieldControl이 비움)
-            // 2) header_field_control.tax_invoice_date 상태를 적용한다
-            // 3) 결과: EDITABLE → 값 표시 / DISABLED → 비활성+값없음 / 없으면 빈값
-            if (!isGL) {
-                const taxInvDate = e.tax_invoice_date || e.tax_date || '';
-                document.getElementById('h-taxdate').value = taxInvDate;
-                if (hfc.tax_invoice_date) {
-                    // applyFieldControl이 DISABLED면 값을 비우므로, 값을 먼저 채운 뒤 상태만 덮어씀
-                    const _hTaxEl = document.getElementById('h-taxdate');
-                    // 상태 클래스만 적용 (DISABLED가 아닌 경우 값 유지)
-                    applyFieldControl('h-taxdate', null, hfc.tax_invoice_date);
-                    // EDITABLE / REQUIRED_RED / USER_SELECT_REQUIRED → 값 복원
-                    if (hfc.tax_invoice_date.status !== 'DISABLED' && taxInvDate) {
-                        _hTaxEl.value = taxInvDate;
-                    }
-                }
+            document.getElementById('h-transdt').value = e.date || today; 
+            document.getElementById('h-doctyp').value = e.doctyp || 'GL'; 
+            document.getElementById('h-docdate').value = e.date || today; 
+            document.getElementById('h-text').value = e.text || document.getElementById('ai-input').value.substring(0, 50); 
+            onDoctypChange(); 
+            
+            const hfc = e.header_field_control || {}; 
+            // ── 반대분개(Opposite Entry) 감지 배지: is_opposite_entry=true이면 헤더에 경고 배지 표시 ──────
+            const existingBadge = document.getElementById('reversal-badge');
+            if (existingBadge) existingBadge.remove();
+            if (e.is_opposite_entry) {
+                const badge = document.createElement('div');
+                badge.id = 'reversal-badge';
+                badge.className = 'fixed top-4 right-4 z-50 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg flex items-center gap-2';
+                badge.innerHTML = '<i class="fa-solid fa-arrows-left-right"></i> 반대분개(Opposite Entry) 처리됨';
+                badge.title = '매출감소, 반품 등에 의해 차대변이 반대분개(Opposite Entry)로 처리되었습니다. 내용을 확인하세요.';
+                document.body.appendChild(badge);
+                setTimeout(() => badge.remove(), 8000);
+            }
+            // ── 세금계산서 발행일: 'GL'이 아닌 경우에만 세팅 (조건문 버그 수정) ─
+            if (document.getElementById('h-doctyp').value !== 'GL') { 
+                document.getElementById('h-taxdate').value = e.tax_invoice_date || ''; 
+                if (hfc.tax_invoice_date) applyFieldControl('h-taxdate', 'taxdate-group', hfc.tax_invoice_date); 
+            } 
+            
+            document.getElementById('h-bizptcd').value = e.bizptcd || ''; 
+            document.getElementById('h-bizname').value = e.bizname || ''; 
+            if (e.bizptcd) {
+                document.getElementById('h-bizptcd').dispatchEvent(new Event('input'));
+                applyBizptGl(e.bizptcd);
             }
 
-            // ── 거래처 ──────────────────────────────────────────────────────
-            const bizptBox = document.getElementById('bizpt-container');
-            if (!isGL) {
-                bizptBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-                document.getElementById('h-bizptcd').value = e.bizptcd || '';
-                document.getElementById('h-bizname').value = e.bizname || '';
-                if (hfc.bizptcd) {
-                    applyFieldControl('h-bizptcd', 'bizpt-container', hfc.bizptcd);
+            // GL 전표는 거래처 입력 자체가 없으므로 REQUIRED_RED/USER_SELECT_REQUIRED 상태를 무시
+            if (hfc.bizptcd) {
+                const _isGL = document.getElementById('h-doctyp').value === 'GL';
+                const _bfc  = (_isGL && ['REQUIRED_RED','USER_SELECT_REQUIRED'].includes(hfc.bizptcd.status))
+                    ? { status: 'EDITABLE', msg: '' }
+                    : hfc.bizptcd;
+                applyFieldControl('h-bizptcd', 'bizpt-container', _bfc);
+            } else if (!e.bizptcd && document.getElementById('h-doctyp').value !== 'GL') {
+                document.getElementById('bizpt-container').classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
+            }
+            
+            // 멀티키(mulky): AI 판단 결과 바인딩 후 field_control 신호로 잠금 여부 결정
+            const mulkyEl = document.getElementById('h-mulky');
+            if (mulkyEl) {
+                mulkyEl.value = e.mulky || ' ';
+                // DISABLED 신호: 선수금('A') 전표 → 셀렉트 비활성화 + 시각적 잠금 스타일
+                if (hfc.mulky && hfc.mulky.status === 'DISABLED') {
+                    mulkyEl.disabled = true;
+                    mulkyEl.classList.add('opacity-50', 'cursor-not-allowed', 'bg-slate-100');
+                    mulkyEl.title = hfc.mulky.msg || '';
                 } else {
-                    // 레거시 폴백: biz_match_status 기반
-                    if (!e.bizptcd) {
-                        bizptBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
-                    } else if (e.biz_match_status === 'FUZZY') {
-                        bizptBox.classList.add('fuzzy-match');
-                    }
+                    mulkyEl.disabled = false;
+                    mulkyEl.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-slate-100');
+                    mulkyEl.title = '';
                 }
             }
 
-            // ── 손익부서 ─────────────────────────────────────────────────────
-            const pctrBox = document.getElementById('pctr-container');
-            pctrBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-            if (!e.pctrcd) {
-                pctrBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
-                document.getElementById('h-pctrcd').value = ''; document.getElementById('h-pctrnm').value = e.profit_center_name || '';
+            document.getElementById('h-pctrcd').value = e.pctrcd || '';
+            document.getElementById('h-pctrnm').value = e.pctrnm || '';
+            if (e.pctrcd) syncPctrToLines();
+            const _pctrSt = { 'EXACT': 'EDITABLE', 'FUZZY': 'WARNING_YELLOW', 'NONE': 'REQUIRED_RED' }[e.pctr_match_status] || 'REQUIRED_RED';
+            applyFieldControl('h-pctrcd', 'pctr-container', { status: _pctrSt });
+
+            document.getElementById('h-anakey').value = e.manaky || '';
+            document.getElementById('h-ananm').value = e.mananm || '';
+            if (e.manaky) syncAnaToLines();
+            const _anaSt = { 'EXACT': 'EDITABLE', 'FUZZY': 'WARNING_YELLOW', 'NONE': 'REQUIRED_RED' }[e.ana_match_status] || 'REQUIRED_RED';
+            applyFieldControl('h-anakey', 'anakey-container', { status: _anaSt });
+            
+            const hTax = document.getElementById('h-taxinfo');
+            if (e.taxcd) {
+                hTax.value = e.taxcd + ' : ' + e.taxnm; 
+                hTax.dataset.txgubun = e.txgubun || ''; 
+                hTax.dataset.supplyBase = e.supply_base || '0';
+                hTax.dataset.supplyVat = e.supply_vat || '0';
             } else {
-                document.getElementById('h-pctrcd').value = e.pctrcd; document.getElementById('h-pctrnm').value = e.pctrnm; syncPctrToLines();
-                if (e.pctr_match_status === 'FUZZY') pctrBox.classList.add('fuzzy-match');
+                hTax.value = '';
             }
 
-            // ── 관리항목 ─────────────────────────────────────────────────────
-            const anaBox = document.getElementById('anakey-container');
-            anaBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-            if (!e.manaky) {
-                anaBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
-                document.getElementById('h-anakey').value = ''; document.getElementById('h-ananm').value = e.item_name || '';
-            } else {
-                document.getElementById('h-anakey').value = e.manaky; document.getElementById('h-ananm').value = e.mananm; syncAnaToLines();
-                if (e.ana_match_status === 'FUZZY') anaBox.classList.add('fuzzy-match');
-            }
+            if (hfc.taxcode) applyFieldControl('h-taxinfo', 'taxinfo-container', hfc.taxcode); 
+            else if (!e.taxcd) document.getElementById('taxinfo-container').classList.add('border-red-500','ring-1','ring-red-500','bg-red-50');
 
-            // ── 세금코드 ─────────────────────────────────────────────────────
-            const taxBox = document.getElementById('taxinfo-container');
-            if (!isGL) {
-                if (hfc.taxcode) {
-                    applyFieldControl('h-taxinfo', 'taxinfo-container', hfc.taxcode);
-                } else {
-                    if (!e.taxcd) { taxBox.classList.add('border-red-500','ring-1','ring-red-500','bg-red-50'); document.getElementById('h-taxinfo').value = ''; }
-                    else { taxBox.classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50'); document.getElementById('h-taxinfo').value = e.taxcd + ' : ' + e.taxnm; }
-                }
-            }
+            // ── 통화·환율: AI 응답 반영 ─────────────────────────────────────
+            // e.local_currency: t_company 조회 회사 기준 통화 (없으면 'KRW' 폴백)
+            // e.currency      : AI/Python이 감지한 거래 통화코드
+            // e.exrate        : t_exrate에서 조회한 환율 (로컬통화=1, 외화=실조회값)
+            // h-exrate 변경 시 onchange="calculateAll()"이 이미 연결되어 있으므로
+            // 여기서는 값만 세팅하고 calculateAll()을 명시적으로 호출해 로컬 금액 즉시 갱신.
+            const _localCur = (e.local_currency || 'KRW').toUpperCase().trim();
+            const _aiCur    = (e.currency || _localCur).toUpperCase().trim();
+            document.getElementById('h-currency').value       = _aiCur;
+            document.getElementById('h-local-currency').value = _localCur;
+            document.getElementById('h-exrate').value   = (_aiCur !== _localCur && e.exrate && e.exrate !== 1)
+                ? e.exrate : 1;
+            calculateAll();
         }
-        
-        function openSearch(t, btn=null) {
-            currentSearchType = t;
-            activeLineBtn = btn;
-            const modal = document.getElementById('search-modal');
-            const queryEl = document.getElementById('modal-query');
-            modal.classList.remove('hidden');
-            document.getElementById('modal-results').innerHTML = '';
-            queryEl.value = '';
-            queryEl.focus();
-            // 계정과목(glmaster)은 팝업 열 때 전체 목록 즉시 자동 조회
-            if (t === 'glmaster') executeSearch();
-        }
+
+        function openSearch(t, btn=null) { currentSearchType = t; activeLineBtn = btn; const modal = document.getElementById('search-modal'); modal.classList.remove('hidden'); document.getElementById('modal-results').innerHTML = ''; document.getElementById('modal-query').value = ''; document.getElementById('modal-query').focus(); if (t === 'glmaster') executeSearch(); }
         function closeModal() { document.getElementById('search-modal').classList.add('hidden'); }
-        
-        async function executeSearch() {
-            const q = document.getElementById('modal-query').value;
-            try {
-                let res = await fetch(`${API_BASE}/search/${currentSearchType}?q=${encodeURIComponent(q)}`);
-                const data = await res.json();
-                if (data.length === 0) { document.getElementById('modal-results').innerHTML = '<div class="p-4 text-center text-slate-500">결과가 없습니다.</div>'; return; }
-                document.getElementById('modal-results').innerHTML = data.map(i => `<div onclick="selectItem('${i.code}','${i.name}', '${i.type||''}')" class="p-4 bg-white hover:bg-indigo-50 cursor-pointer border-b text-sm font-bold"><b>${i.code}</b> | <span>${i.name}</span></div>`).join('');
-            } catch(err) { alert(`검색 오류: ${err.message}`); }
-        }
-        
+        async function executeSearch() { const q = document.getElementById('modal-query').value; try { let res = await fetch(`${API_BASE}/search/${currentSearchType}?q=${encodeURIComponent(q)}`); const data = await res.json(); if (data.length === 0) { document.getElementById('modal-results').innerHTML = '<div class="p-4 text-center text-slate-500">결과가 없습니다.</div>'; return; } document.getElementById('modal-results').innerHTML = data.map(i => `<div onclick="selectItem('${i.code}','${i.name}', '${i.type||''}')" class="p-4 bg-white hover:bg-indigo-50 cursor-pointer border-b text-sm font-bold"><b>${i.code}</b> | <span>${i.name}</span></div>`).join(''); } catch(err) { alert(`검색 오류: ${err.message}`); } }
         function selectItem(c, n, t) {
             if(currentSearchType === 'bizpt') {
                 document.getElementById('h-bizptcd').value = c;
                 document.getElementById('h-bizname').value = n;
                 document.getElementById('bizpt-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
-                // 거래처 선택 완료 → 기본 AR/AP 계정 자동 매핑
                 applyBizptGl(c);
-            }
-            else if(currentSearchType === 'pctr') { document.getElementById('h-pctrcd').value = c; document.getElementById('h-pctrnm').value = n; document.getElementById('pctr-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match'); syncPctrToLines(); }
-            else if(currentSearchType === 'anakey') { document.getElementById('h-anakey').value = c; document.getElementById('h-ananm').value = n; document.getElementById('anakey-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match'); syncAnaToLines(); }
-            else if(currentSearchType === 'taxkey') { document.getElementById('h-taxinfo').value = `${c} : ${n}`; document.getElementById('taxinfo-container').classList.remove('border-red-500', 'ring-1', 'ring-red-500', 'bg-red-50'); }
-            else if(currentSearchType === 'glmaster' && activeLineBtn) {
+            } else if(currentSearchType === 'pctr') {
+                if (activeLineBtn) {
+                    // 라인 개별 검색: 버튼과 같은 flex div 안의 line-pctr에만 적용 + 잠금
+                    const inp = activeLineBtn.closest('div').querySelector('.line-pctr');
+                    if (inp) { inp.value = c; setManualLock(inp); markEdit(); }
+                } else {
+                    // 헤더 검색: 전체 미잠금 라인에 동기화
+                    document.getElementById('h-pctrcd').value = c;
+                    document.getElementById('h-pctrnm').value = n;
+                    document.getElementById('pctr-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
+                    syncPctrToLines();
+                }
+            } else if(currentSearchType === 'anakey') {
+                if (activeLineBtn) {
+                    // 라인 개별 검색: 버튼과 같은 flex div 안의 line-anakey에만 적용 + 잠금
+                    const inp = activeLineBtn.closest('div').querySelector('.line-anakey');
+                    if (inp) { inp.value = c; setManualLock(inp); markEdit(); }
+                } else {
+                    // 헤더 검색: 전체 미잠금 라인에 동기화
+                    document.getElementById('h-anakey').value = c;
+                    document.getElementById('h-ananm').value = n;
+                    document.getElementById('anakey-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50','fuzzy-match');
+                    syncAnaToLines();
+                }
+            } else if(currentSearchType === 'taxkey') {
+                // ── taxtyp vs doctyp 방향 검증 ────────────────────────────────
+                // t 형식: 'txgubun|taxtyp|taxrate'  (mainai.py SQL에서 || 연결로 전달)
+                // · txgubun : 세금구분 ('1'=일반, 'D'=불공제, '2'/'3'=영세/면세)
+                // · taxtyp  : 방향구분 ('S'=매출, 'P'=매입, 'D'=불공제매입)
+                // · taxrate : 실제 세율 숫자 (0, 10 등)
+                const _parts  = (t || '').split('|');
+                const txgubun = _parts[0] || '';
+                const taxtyp  = _parts[1] || '';
+                const taxrate = parseFloat(_parts[2]) || 0;
+                const doctyp  = document.getElementById('h-doctyp').value;
+                // taxtyp 값이 있을 때만 검증 (값 없으면 마스터 미설정으로 Skip)
+                // DB(t_ctxkey) 실제 값: 'S'=매출(Output), 'P'=매입(Input), 'D'=불공제매입
+                if (taxtyp) {
+                    if (doctyp === 'CI' && taxtyp !== 'S') {
+                        alert("선택하신 tax code가 매입 또는 매출 관련 여부인지 확인하세요.\n(매출(CI) 전표에는 매출 세금코드[taxtyp=S]를 선택하세요)");
+                        closeModal(); return;
+                    }
+                    if (doctyp === 'SI' && taxtyp !== 'P' && taxtyp !== 'D') {
+                        alert("선택하신 tax code가 매입 또는 매출 관련 여부인지 확인하세요.\n(매입(SI) 전표에는 매입 세금코드[taxtyp=P 또는 D]를 선택하세요)");
+                        closeModal(); return;
+                    }
+                }
+                document.getElementById('h-taxinfo').value = `${c} : ${n}`;
+                document.getElementById('h-taxinfo').dataset.txgubun = txgubun;
+                document.getElementById('h-taxinfo').dataset.taxrate  = taxrate;
+                document.getElementById('taxinfo-container').classList.remove('border-red-500','ring-1','ring-red-500','bg-red-50');
+                onTaxCodeSelected(c, n, txgubun, taxrate);
+            } else if(currentSearchType === 'glmaster' && activeLineBtn) {
                 const tr = activeLineBtn.closest('tr');
-                // 거래처 기본 계정으로 잠긴 라인은 GL 변경 불가
                 if (tr.dataset.glLocked === 'true') { closeModal(); return; }
-                tr.querySelector('.line-gl').value = c; tr.querySelector('.line-glname').value = n;
+                tr.querySelector('.line-gl').value = c;
+                tr.querySelector('.line-glname').value = n;
                 tr.querySelector('.gl-container').classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500');
                 tr.querySelector('.gl-container').classList.add('bg-white');
                 const dueInput = tr.querySelector('.line-duedt');
-                if(t === 'C' || t === 'S') { dueInput.disabled = false; dueInput.classList.remove('disabled-input'); }
+                if(['C','S'].includes(t)) { dueInput.disabled = false; dueInput.classList.remove('disabled-input'); }
                 else { dueInput.disabled = true; dueInput.classList.add('disabled-input'); dueInput.value = ''; }
                 markEdit();
             }
             closeModal();
         }
-
-        function syncPctrToLines() { const v = document.getElementById('h-pctrcd').value; document.querySelectorAll('.line-pctr').forEach(i => i.value = v); }
-        function syncAnaToLines() { const v = document.getElementById('h-anakey').value; document.querySelectorAll('.line-anakey').forEach(i => i.value = v); }
-
-        /** 거래처 선택 시 해당 doctyp의 AR(CI) 또는 AP(SI) 라인에 기본 계정 자동 매핑 후 필드 잠금 */
-        async function applyBizptGl(bizptcd) {
-            const doctyp = document.getElementById('h-doctyp').value;
-            // GL 자동매핑 대상: CI → AR 라인, SI → AP 라인 (GL 전표는 해당 없음)
-            const targetType = doctyp === 'CI' ? 'AR' : doctyp === 'SI' ? 'AP' : null;
-            if (!targetType) return;
-
-            try {
-                const res = await fetch(`${API_BASE}/bizpt-gl?bizptcd=${encodeURIComponent(bizptcd)}`);
-                if (!res.ok) return;
-                const data = await res.json();
-
-                const glCode = doctyp === 'CI' ? data.custgl : data.suppgl;
-                const glName = doctyp === 'CI' ? data.custgl_nm : data.suppgl_nm;
-                if (!glCode) return;  // 거래처에 기본 계정 미등록 시 스킵
-
-                document.querySelectorAll('#journal-tbody tr').forEach(tr => {
-                    if (tr.dataset.aiType !== targetType) return;
-
-                    const glInput    = tr.querySelector('.line-gl');
-                    const glNameInput = tr.querySelector('.line-glname');
-                    const glContainer = tr.querySelector('.gl-container');
-                    const searchBtn   = glContainer ? glContainer.querySelector('button') : null;
-
-                    // 기존 잠금 해제 후 재적용 (거래처 변경 시 덮어쓰기 허용)
-                    unlockGlField(tr);
-
-                    glInput.value     = glCode;
-                    glNameInput.value = glName;
-                    glContainer.classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500');
-                    glContainer.classList.add('bg-white');
-
-                    // 잠금 적용: 사용자가 임의 변경 불가
-                    glInput.classList.add('biz-gl-locked');
-                    glNameInput.classList.add('biz-gl-locked');
-                    if (searchBtn) {
-                        searchBtn.disabled = true;
-                        searchBtn.classList.add('biz-gl-locked-btn');
-                    }
-                    tr.dataset.glLocked = 'true';
-                });
-            } catch(e) {
-                console.warn('거래처 기본 계정 조회 실패:', e);
-            }
-        }
-
-        /** AR/AP 라인의 GL 잠금 해제 (거래처 변경 또는 라인 재렌더링 시 호출) */
-        function unlockGlField(tr) {
-            const glInput     = tr.querySelector('.line-gl');
-            const glNameInput = tr.querySelector('.line-glname');
-            const glContainer = tr.querySelector('.gl-container');
-            const searchBtn   = glContainer ? glContainer.querySelector('button') : null;
-            if (glInput)     glInput.classList.remove('biz-gl-locked');
-            if (glNameInput) glNameInput.classList.remove('biz-gl-locked');
-            if (searchBtn)   { searchBtn.disabled = false; searchBtn.classList.remove('biz-gl-locked-btn'); }
-            delete tr.dataset.glLocked;
-        }
-
-        // 페이지 로드 시 DB 학습 패턴을 드롭다운에 추가
+        async function applyBizptGl(bizptcd) { const doctyp = document.getElementById('h-doctyp').value; const targetType = doctyp === 'CI' ? 'AR' : doctyp === 'SI' ? 'AP' : null; if (!targetType) return; try { const res = await fetch(`${API_BASE}/bizpt-gl?bizptcd=${encodeURIComponent(bizptcd)}`); if (!res.ok) return; const data = await res.json(); const glCode = doctyp === 'CI' ? data.custgl : data.suppgl; const glName = doctyp === 'CI' ? data.custgl_nm : data.suppgl_nm; if (!glCode) return; document.querySelectorAll('#journal-tbody tr').forEach(tr => { if (tr.dataset.aiType !== targetType) return; const glInput = tr.querySelector('.line-gl'); const glNameInput = tr.querySelector('.line-glname'); const glContainer = tr.querySelector('.gl-container'); const searchBtn = glContainer ? glContainer.querySelector('button') : null; glInput.value = glCode; glNameInput.value = glName; glContainer.classList.remove('bg-red-50', 'border-red-500', 'ring-1', 'ring-red-500'); glContainer.classList.add('bg-white'); glInput.classList.add('biz-gl-locked'); glNameInput.classList.add('biz-gl-locked'); if (searchBtn) { searchBtn.disabled = true; searchBtn.classList.add('biz-gl-locked-btn'); } tr.dataset.glLocked = 'true'; }); } catch(e) { console.warn('거래처 기본 계정 조회 실패:', e); } }
         loadDbPatterns();
     </script>
 </body>

@@ -31,7 +31,8 @@ CRITICAL: OUTPUT ONLY RAW JSON. NO MARKDOWN (```json). NO EXPLANATION. ANY TEXT 
       D 복리후생비 amount:1820000 / D 예수금 amount:180000 / C 현금 amount:2000000
 
 [데이터 추출 규칙]
-- bizname: 거래처명. item_name: 상품·브랜드 등 고유명사만 (일반명사·조사 제외, 없으면 "").
+- bizname: 거래 상대방의 상호명. 주식회사·(주)·유한회사·(유) 등 법인격 표현은 가급적 제외하고 핵심 명칭만 추출 (예: "삼성전자(주)" → "삼성전자", "주식회사 국민은행" → "국민은행"). 거래처가 없거나 불명확하면 "".
+- item_name: 상품·브랜드 등 고유명사만 (일반명사·조사 제외, 없으면 "").
 - profit_center_name: 부서 고유명사만 (조사 제외, 없으면 "").
 - expense_keyword: 비용 성격 핵심 단어 1개 (식대·소모품·여비·임차료 등). 거래행위어(지급·구매·부가세) 제외. 없으면 "".
 - date: 거래일(YYYY-MM-DD).

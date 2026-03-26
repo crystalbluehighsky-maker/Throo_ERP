@@ -81,6 +81,114 @@ class ThrooHybridEngine:
         ZERO = Decimal('0')
 
         # ══════════════════════════════════════════════════════════════════
+        # [단위 보정] 한글 통화 단위 초정밀 인식 → total_amount 원(KRW) 절대값 변환
+        # ─ 설계 원칙 ─
+        # 1. KRW 전용: 외화(USD·JPY 등)이면 이 블록 전체를 건너뜀
+        # 2. 콤마 제거 후 탐색 — "1,500만원" 처럼 콤마가 숫자를 끊는 오탐 방지
+        # 3. 복합 단위 패턴(억+천만 등)을 단일 패턴보다 먼저 시도
+        # 4. 단일 단위는 _UNIT_TABLE 순서(긴 단위·큰 단위 우선)로 첫 매칭만 채택
+        # 5. _unit_aware_amount: 변환 결과를 가드레일 1/3에 전달하는 트래킹 변수
+        # ══════════════════════════════════════════════════════════════════
+        _unit_aware_amount: Decimal = ZERO  # 외화이면 ZERO 유지 → 가드레일 정상 동작
+
+        # local_currency: result_json에 저장된 회사 기준 통화 (t_company 조회값).
+        # 없으면 'KRW' 폴백 (구 데이터 호환).
+        _local_cur_now  = (result_json.get("local_currency") or "KRW").strip().upper()
+        _currency_now   = (result_json.get("currency")       or _local_cur_now).strip().upper()
+        if _currency_now != _local_cur_now:
+            # 외화 거래: 로컬 통화 단위 표현(만원/억 등)이 없으므로 변환하면 금액 왜곡
+            logger.info(
+                f"[단위보정 생략] currency={_currency_now} ≠ local={_local_cur_now} "
+                f"→ 원문 숫자 그대로 사용"
+            )
+        else:
+            _text_nc = raw_text.replace(",", "")  # 콤마 제거 — 단위 탐색 전용
+
+            # ── 복합 단위 패턴 (큰+작은 단위 조합, 긴 패턴 우선) ────────────────
+            _COMPOSITE_UNIT_PATTERNS = [
+                # "1억 2천만원" → 120,000,000
+                (r'(\d+(?:\.\d+)?)\s*억\s*(\d+(?:\.\d+)?)\s*천만원?', 100_000_000, 10_000_000),
+                # "1억 5백만원" → 150,000,000
+                (r'(\d+(?:\.\d+)?)\s*억\s*(\d+(?:\.\d+)?)\s*백만원?', 100_000_000,  1_000_000),
+                # "1억 5만원"   → 100,050,000
+                (r'(\d+(?:\.\d+)?)\s*억\s*(\d+(?:\.\d+)?)\s*만원?',   100_000_000,     10_000),
+                # "1억 5천원"   → 100,005,000
+                (r'(\d+(?:\.\d+)?)\s*억\s*(\d+(?:\.\d+)?)\s*천원?',   100_000_000,      1_000),
+                # "3천만 5만원" → 30,050,000
+                (r'(\d+(?:\.\d+)?)\s*천만\s*(\d+(?:\.\d+)?)\s*만원?',  10_000_000,     10_000),
+            ]
+
+            # ── 단일 단위 테이블 (긴 단위·큰 단위 우선 — 순서가 매칭 우선순위) ──
+            _UNIT_TABLE = [
+                ('천억원', Decimal('100000000000')),
+                ('천억',   Decimal('100000000000')),
+                ('억원',   Decimal('100000000')),
+                ('억',     Decimal('100000000')),
+                ('천만원', Decimal('10000000')),
+                ('천만',   Decimal('10000000')),
+                ('백만원', Decimal('1000000')),
+                ('백만',   Decimal('1000000')),
+                ('만원',   Decimal('10000')),
+                ('만',     Decimal('10000')),
+                ('천원',   Decimal('1000')),
+                ('천',     Decimal('1000')),
+            ]
+
+            _unit_converted = False
+
+            # 1단계: 복합 패턴 시도 (큰 단위+작은 단위 조합)
+            for _pat, _mul_a, _mul_b in _COMPOSITE_UNIT_PATTERNS:
+                _um = re.search(_pat, _text_nc)
+                if _um:
+                    _conv = Decimal(_um.group(1)) * _mul_a + Decimal(_um.group(2)) * _mul_b
+                    logger.info(
+                        f"[단위보정] 복합단위 '{_um.group(0)}' "
+                        f"({int(_mul_a):,}+{int(_mul_b):,}) → {int(_conv):,}원"
+                    )
+                    result_json["total_amount"] = int(_conv)
+                    _unit_aware_amount = _conv
+                    _unit_converted = True
+                    break
+
+            # 2단계: 단일 단위 시도 (큰 단위 우선, 첫 매칭에서 확정)
+            if not _unit_converted:
+                for _unit_suffix, _multiplier in _UNIT_TABLE:
+                    _um = re.search(
+                        r'(\d+(?:\.\d+)?)\s*' + re.escape(_unit_suffix), _text_nc
+                    )
+                    if _um:
+                        _conv    = Decimal(_um.group(1)) * _multiplier
+                        _cur_tot = Decimal(str(result_json.get("total_amount") or 0))
+
+                        # ★ _unit_aware_amount는 _need_update 와 무관하게 항상 설정한다.
+                        # 이유: AI가 이미 올바른 절대값(예: 3,300,000)을 total_amount에 넣었더라도
+                        #       원문에는 "330만원" 이라고 표기되므로, 뒤쪽 가드레일 1에서
+                        #       source_amount가 "330" 으로 추출된다.
+                        #       _unit_aware_amount가 없으면 가드레일 3이 3,300,000 ≠ 330 으로
+                        #       판단해 AI 정답을 강제 환원하는 오작동이 발생한다.
+                        _unit_aware_amount = _conv
+
+                        # total_amount 갱신: 억 이상은 무조건, 만·천은 5배 이상 차이일 때만
+                        _need_update = (
+                            _multiplier >= Decimal('100000000')
+                            or _cur_tot <= ZERO
+                            or (_conv / (_cur_tot if _cur_tot > ZERO else Decimal('1'))) >= Decimal('5')
+                        )
+                        if _need_update:
+                            logger.info(
+                                f"[단위보정] 단일단위 '{_um.group(0)}' "
+                                f"(×{int(_multiplier):,}) → {int(_conv):,}원 (total_amount 갱신)"
+                            )
+                            result_json["total_amount"] = int(_conv)
+                        else:
+                            logger.info(
+                                f"[단위보정] 단일단위 '{_um.group(0)}' 감지 — "
+                                f"AI 결과({int(_cur_tot):,}원) 신뢰, total_amount 유지 / "
+                                f"_unit_aware_amount={int(_conv):,} 설정 완료"
+                            )
+                        break  # 첫 매칭 단위에서 확정 (더 작은 단위로 내려가지 않음)
+
+        # ══════════════════════════════════════════════════════════════════
         # [가드레일 0] 부가세 관련성 검사 — 가장 먼저 실행
         # 문장에 부가세 언급이 없으면 10% 안분 로직을 완전히 건너뛰고,
         # total_amount를 그대로 공급가로 확정한다.
@@ -130,12 +238,18 @@ class ThrooHybridEngine:
         mode     = result_json.get("amt_mode", "TOTAL")
         tot      = _to_d(result_json.get("total_amount"))
         sup      = _to_d(result_json.get("supply_base"))
-        vat_rate = _to_d(result_json.get("vat_rate") or 10) / Decimal('100')
+        # ★ vat_rate 0% 버그 방지: `or 10` 패턴은 0을 falsy로 처리해 10%로 덮어씀.
+        # None(미추출) → 기본값 10% / 0(명시적 0%) → 0% 그대로 유지
+        _vat_val = result_json.get("vat_rate")
+        vat_rate = (Decimal(str(_vat_val)) if _vat_val is not None else Decimal('10')) / Decimal('100')
         text_clean = raw_text.replace(",", "")
 
         # [가드레일 1] 원문에서 '진짜' 기준 금액 탐지
         # '원' 앞 숫자를 최우선, 없으면 3자리 이상 숫자 중 최댓값 사용
         # → '구매1팀', '2026년' 등 문맥상 금액이 아닌 짧은 숫자를 자동 배제
+        # ★ 단위 변환이 발생한 경우(_unit_aware_amount > 0): 원문의 단위 표현("330만원" 등)은
+        #   `\d+\s*원` 패턴에 매칭되지 않아 source_amount가 소수로 추출될 수 있다.
+        #   이 경우 _unit_aware_amount를 source_amount로 채택하여 가드레일 3 오발화를 방지한다.
         price_match   = re.search(r'(\d[\d,]*)\s*원', raw_text)
         all_long_nums = [Decimal(n) for n in re.findall(r'\d+', text_clean) if len(n) >= 3]
 
@@ -144,6 +258,15 @@ class ThrooHybridEngine:
             source_amount = Decimal(price_match.group(1).replace(",", ""))
         elif all_long_nums:
             source_amount = max(all_long_nums)
+
+        # 단위 변환이 발생했다면 변환된 금액을 정권 source_amount로 교체
+        # (예: "330만원" → source_amount=330 → 교체 후 3,300,000)
+        if _unit_aware_amount > ZERO:
+            logger.info(
+                f"[가드레일 1] 단위 변환 감지 → source_amount {source_amount:,.0f} "
+                f"→ {int(_unit_aware_amount):,} 으로 교체"
+            )
+            source_amount = _unit_aware_amount
 
         # [가드레일 2] 명시적 제외/별도/공급가 키워드 → mode 강제 결정
         # AI의 amt_mode 판단보다 원문 키워드를 절대 우선한다.
@@ -160,16 +283,23 @@ class ThrooHybridEngine:
         else:
             # 키워드 없음 → 원문 금액은 합계(TOTAL)
             mode = "TOTAL"
-            if tot > ZERO and str(int(tot)) not in text_clean and source_amount > ZERO:
-                # [가드레일 3] AI 산수(Hallucination) 감지 및 강제 보정
-                # tot가 원문에 없는 계산값이면 source_amount로 교체
+            # [가드레일 3] AI 산수(Hallucination) 감지 및 강제 보정
+            # ─ 개선된 판단 기준 ─
+            # ① source_amount가 유효해야 함 (비교 대상 존재)
+            # ② tot와 source_amount가 실질적으로 다를 때만 차단
+            #    (단위 변환 포함 후에도 일치하지 않는 경우 = 진짜 Hallucination)
+            # ③ 오차 허용 범위: 반올림 등으로 1원 이하 차이는 동일로 간주
+            # ④ 단위 변환된 source_amount와 tot가 일치하면 차단하지 않음
+            #    (예: "330만원" → source=3,300,000 / tot=3,300,000 → 통과)
+            _amounts_match = source_amount > ZERO and abs(tot - source_amount) <= Decimal('1')
+            if tot > ZERO and source_amount > ZERO and not _amounts_match:
                 original_tot = tot
                 tot = source_amount
                 for line in result_json.get("lines", []):
                     line["amount"] = 0
                 logger.info(
-                    f"[가드레일] AI 산수 차단: {int(original_tot):,} 원문 없음 "
-                    f"→ 원문 금액 {int(tot):,}로 강제 환원 및 라인 재계산 실행"
+                    f"[가드레일 3] AI 산수 차단: tot={int(original_tot):,} ≠ source={int(source_amount):,} "
+                    f"→ {int(tot):,}으로 강제 환원 및 라인 재계산 실행"
                 )
 
         # [최종 금액 확정 및 안분]
@@ -191,6 +321,7 @@ class ThrooHybridEngine:
                 base = _round_won(tot / (Decimal('1') + vat_rate))
                 vat  = tot - base
             else:
+                # vat_rate = 0(영세율·면세): supply_base = total_amount, vat = 0
                 base = tot
                 vat  = ZERO
             result_json["total_amount"] = int(tot)
@@ -199,6 +330,20 @@ class ThrooHybridEngine:
             logger.info(
                 f"[금액확정] TOTAL: tot={tot:,.0f} → base={base:,.0f} / vat={vat:,.0f}"
             )
+
+        # ── vat_rate = 0 후처리: TAX 라인 강제 제거 ────────────────────────────
+        # 영세율(0%)·면세 거래에는 부가세 라인 자체가 존재해서는 안 된다.
+        # 벡터 DB 패턴에서 TAX 라인을 가져왔더라도 완전 제거하여 차대 합계 불일치 방지.
+        if vat_rate == ZERO:
+            _lines_before = result_json.get("lines", [])
+            _lines_after  = [l for l in _lines_before if l.get("type", "").upper() != "TAX"]
+            _removed      = len(_lines_before) - len(_lines_after)
+            if _removed:
+                result_json["lines"] = _lines_after
+                logger.info(
+                    f"[vat_rate=0] TAX 라인 {_removed}개 제거 완료 "
+                    f"(영세율/면세 전표 — 부가세 라인 불필요)"
+                )
 
     @staticmethod
     def _match_status(score) -> str:
@@ -402,6 +547,16 @@ class ThrooHybridEngine:
         '선불', '계약 입금', '선금', '착수금', '보증금 입금',
     ]
 
+    # ── 선급금(계약금 지급) 처리 감지 키워드 ──────────────────────────────────
+    # SI(매입) 전표에서 이 키워드 + AP방향 키워드가 감지되면 차변 계정을 120000(선급금)으로 고정하고
+    # mulky='A' 를 세팅한다. 세금계산서 수취 대상 아님(PX00 코드 힌트).
+    _ADVANCE_PURCHASE_KW = [
+        '선급금', '계약금', '착수금', '선불', '선금',
+        '선급 지급', '계약금 지급', '착수금 지급', '선불 지급',
+        '선지급', '계약금 송금', '착수금 송금', '선급금 송금',
+        '미리 지급', '미리지급',
+    ]
+
     # 즉시 지불 성격 비용: 이자·수수료·공과금 + 지급 조합 → SI가 아닌 GL 우선
     # 예: "이자 지급", "수수료 납부", "공과금 결제" — 외상(AP 오픈아이템) 거래가 아님
     _GL_OVERRIDE_KW  = ['이자', '수수료', '공과금', '세금과공과', '과태료', '벌과금',
@@ -502,6 +657,21 @@ class ThrooHybridEngine:
             logger.info(f"[CACHE HIT] '{raw_text[:30]}...' → {time.time()-_t_start:.3f}s")
             return self._result_cache[_cache_key]
 
+        # ── 회사 기준 통화(Local Currency) 조회 ────────────────────────────────
+        # 글로벌 법인(USD 본사, EUR 유럽법인 등) 지원을 위해 'KRW' 하드코딩을 제거하고
+        # t_company.curren 값을 기준 통화로 사용한다.
+        # 조회 실패 시 안전 폴백으로 'KRW' 사용.
+        try:
+            _lc_row = db.execute(
+                text("SELECT curren FROM t_company WHERE comcd = :c LIMIT 1"),
+                {"c": comcd}
+            ).fetchone()
+            local_currency = (_lc_row[0] or "KRW").strip().upper() if _lc_row else "KRW"
+        except Exception as _lc_e:
+            local_currency = "KRW"
+            logger.warning(f"[로컬통화 조회 실패] {_lc_e} → 폴백 KRW 사용")
+        logger.info(f"[로컬통화] comcd={comcd} → local_currency={local_currency}")
+
         # 0. Python 규칙 기반 전표 유형 사전 추론
         doctype_hint = self._detect_doctype_hint(raw_text)
         logger.info(f"Doctype hint: {doctype_hint} for: '{raw_text[:40]}'")
@@ -514,6 +684,15 @@ class ThrooHybridEngine:
         flag_advance_payment = (
             doctype_hint in ("CI", None)
             and any(kw in raw_text for kw in self._ADVANCE_PAYMENT_KW)
+        )
+        # 선급금 플래그: SI/GL 힌트 + 계약금/선급금 키워드 + AP방향 키워드 조합일 때 활성화
+        # AP_KEYWORDS(지급/송금 등) 가드로 "계약금 입금"(AR) 오판 방지.
+        # flag_advance_payment과 상호 배제: 동일 키워드가 양쪽 감지 시 선수금(CI) 우선.
+        flag_advance_purchase = (
+            doctype_hint in ("SI", "GL", None)
+            and any(kw in raw_text for kw in self._ADVANCE_PURCHASE_KW)
+            and any(kw in raw_text for kw in self._AP_KEYWORDS)
+            and not flag_advance_payment
         )
         # ── 법인카드 플래그: 단순 키워드 존재가 아닌 실제 결제 수단 판별 ──────────
         # 부정어/대체어가 있으면 "법카 언급됐지만 실제 결제는 다른 수단" → False
@@ -587,10 +766,12 @@ class ThrooHybridEngine:
             or _has_reversal_standalone                        # ③ 단독 반대분개(Opposite Entry) 용어
         )
 
-        if flag_cash_receipt:   logger.info(f"[플래그] AR 수금 폴백 활성화: '{raw_text[:30]}'")
-        if flag_small_cash_exp: logger.info(f"[플래그] 소액 현금 지출 활성화: '{raw_text[:30]}'")
-        if flag_out_of_pocket:  logger.info(f"[플래그] 사비 대납(OOP) 감지 → AP 미지급금 강제 Override 예정: '{raw_text[:50]}'")
-        if is_opposite_entry:   logger.info(f"[플래그] 반대분개(Opposite Entry) 감지 → D/C Swap 예정: '{raw_text[:60]}'")
+        if flag_cash_receipt:     logger.info(f"[플래그] AR 수금 폴백 활성화: '{raw_text[:30]}'")
+        if flag_small_cash_exp:   logger.info(f"[플래그] 소액 현금 지출 활성화: '{raw_text[:30]}'")
+        if flag_advance_payment:  logger.info(f"[플래그] 선수금(AR) 감지 → 215000/mulky=A 예정: '{raw_text[:50]}'")
+        if flag_advance_purchase: logger.info(f"[플래그] 선급금(AP) 감지 → 120000/mulky=A 예정: '{raw_text[:50]}'")
+        if flag_out_of_pocket:    logger.info(f"[플래그] 사비 대납(OOP) 감지 → AP 미지급금 강제 Override 예정: '{raw_text[:50]}'")
+        if is_opposite_entry:     logger.info(f"[플래그] 반대분개(Opposite Entry) 감지 → D/C Swap 예정: '{raw_text[:60]}'")
         if _corp_mentioned and _corp_negated:
             logger.info(f"[플래그] 법인카드 언급 있으나 부정/대체 문맥 → flag_corp_card=False: '{raw_text[:40]}'")
         elif flag_corp_card:
@@ -636,12 +817,29 @@ class ThrooHybridEngine:
 
             pattern_guide  = f"### [필수 참조 패턴]\n{json.dumps(lines_for_ai, ensure_ascii=False)}"
 
-            # ── 2순위 안전장치: DB가 GL이어도 AR/AP 키워드가 명확하면 CI/SI 강제 전환 ──
-            if db_docty == 'GL' and doctype_hint in ('CI', 'SI'):
-                effective_docty = doctype_hint
-                logger.info(f"Doctype override: DB=GL → keyword_hint={doctype_hint} (safety net)")
+            # ── 출금 동사 우선 원칙 (DB 패턴 오염 차단) ─────────────────────────────
+            # '지급/송금/이체/결제' 등 명시적 출금 동사가 있고 입금 동사가 없으면
+            # 과거 학습 데이터의 잘못된 CI 패턴을 무시하고 SI로 강제 확정한다.
+            # '받/입금/수금' 보호 키워드로 "지급받다" 등 입금 문맥 오판을 방지한다.
+            _INFLOW_GUARD     = ['받', '입금', '수금', '수납', '들어왔', '수취']
+            _has_outflow_only = (
+                any(kw in raw_text for kw in self._INSTANT_PAY_KW)
+                and not any(kw in raw_text for kw in _INFLOW_GUARD)
+            )
+            if _has_outflow_only and db_docty != 'SI':
+                effective_docty = 'SI'
+                logger.info(
+                    f"[doctype 동사우선] 출금동사 감지·입금동사 없음, "
+                    f"DB='{db_docty}' 무시 → SI 강제 확정 (raw='{raw_text[:40]}')"
+                )
             else:
-                effective_docty = db_docty
+                # Python 키워드 힌트(CI/SI)는 DB 패턴 유형보다 우선한다.
+                # doctype_hint == 'GL'(방향 불명)일 때만 DB 패턴 유형을 따른다.
+                effective_docty = doctype_hint if doctype_hint != 'GL' else db_docty
+                if effective_docty != db_docty:
+                    logger.info(
+                        f"[doctype 힌트우선] hint='{doctype_hint}' > DB='{db_docty}' → {effective_docty}"
+                    )
 
             logger.info(f"Vector DB match: id={pattern_id} dist={cand.dist:.4f} effective_docty={effective_docty}")
         else:
@@ -1017,6 +1215,80 @@ class ThrooHybridEngine:
                         f"[Account Match] 패턴(id={pattern_id}) 계정 그대로 사용"
                     )
             
+            # ── 외화 통화 감지 (calculate_accounting_amounts 호출 전 필수) ────────
+            # 우선순위: LLM이 이미 채운 currency 필드 → 원문 패턴 감지 → local_currency
+            # local_currency는 함수 진입 시 t_company에서 조회한 회사 기준 통화.
+            # local_currency 기준으로 외화 여부를 판단하므로 KRW 하드코딩 없음.
+            _FX_MARKERS = [
+                ('USD', [r'USD', r'\$', r'달러']),
+                ('JPY', [r'JPY', r'[¥円]', r'엔화', r'\d\s*엔']),
+                ('EUR', [r'EUR', r'€']),
+                ('CNY', [r'CNY', r'RMB', r'위안']),
+                ('GBP', [r'GBP', r'£']),
+            ]
+            _pre_cur = (result_json.get("currency") or local_currency).strip().upper()
+            if _pre_cur == local_currency:
+                for _cur_code, _pats in _FX_MARKERS:
+                    if any(re.search(p, raw_text, re.IGNORECASE) for p in _pats):
+                        _pre_cur = _cur_code
+                        break
+            result_json["currency"]       = _pre_cur
+            result_json["local_currency"] = local_currency   # 프론트 기본값 표시용
+            if _pre_cur != local_currency:
+                logger.info(f"[외화감지] currency={_pre_cur} (local={local_currency}) — 단위 보정 건너뜀")
+
+            # ══════════════════════════════════════════════════════════════════
+            # ── 외화 환율 조회 (t_nexrate) — 금액 계산 전 확정 ────────────────
+            # 환율은 모든 금액 계산의 기준이므로 calculate_accounting_amounts
+            # 호출 전에 먼저 확정한다. PHASE C/D 등 이후 로직도 정확한 exrate 활용.
+            # 조건: extype='S'(매매기준율), srccur=감지통화, tarcur=local_currency
+            # 당일 데이터가 없으면 기준일 이전 가장 가까운 데이터(As-of Query) 사용.
+            # ══════════════════════════════════════════════════════════════════
+            _final_cur = result_json.get("currency",       local_currency)
+            _local_cur = result_json.get("local_currency", local_currency)
+            if _final_cur and _final_cur != _local_cur:
+                _ref_dt = result_json.get("date") or ""
+                if not _ref_dt:
+                    import datetime as _dt_mod
+                    _ref_dt = _dt_mod.date.today().isoformat()
+                try:
+                    _er_row = db.execute(text("""
+                        SELECT exrat FROM t_nexrate
+                        WHERE  extype = 'S'
+                          AND  srccur = :srccur
+                          AND  tarcur = :local_cur
+                          AND  date   <= :target_date
+                        ORDER  BY date DESC
+                        LIMIT  1
+                    """), {
+                        "srccur":      _final_cur,
+                        "local_cur":   _local_cur,
+                        "target_date": _ref_dt,
+                    }).fetchone()
+                    if _er_row:
+                        result_json["exrate"] = float(_er_row[0])
+                        logger.info(
+                            f"[환율조회] {_final_cur}/{_local_cur} = {result_json['exrate']:,.4f} "
+                            f"(기준일≤{_ref_dt}, t_nexrate)"
+                        )
+                    else:
+                        result_json["exrate"] = 1.0
+                        result_json.setdefault("validation_warnings", []).append(
+                            f"{_final_cur}/{_local_cur} 환율 데이터가 없습니다. "
+                            f"환율을 직접 입력해 주세요."
+                        )
+                        result_json["needs_review"] = True
+                        logger.warning(
+                            f"[환율조회] {_final_cur}/{_local_cur} 데이터 없음 (기준일≤{_ref_dt}) "
+                            f"→ exrate=1, 직접 입력 필요"
+                        )
+                except Exception as _er_exc:
+                    result_json["exrate"] = 1.0
+                    logger.error(f"[환율조회 오류] {_er_exc}")
+            else:
+                result_json.setdefault("exrate", 1.0)
+                result_json["currency"] = _local_cur
+
             # 💡 파이썬 백엔드 수학적 금액 강제 계산 로직 (AMOUNT_EXTRACTION_RULES 반영)
             self.calculate_accounting_amounts(result_json, raw_text)
             tot = result_json["total_amount"]
@@ -1481,8 +1753,8 @@ class ThrooHybridEngine:
                 elif l_type in ("AR", "AP"):
                     # ▶ 채권·채무 라인: 부가세 포함 총액
                     line["bizamt"], line["biztax"] = tot, 0
-                elif l_type in ("REV", "EXP"):
-                    # ▶ 수익·비용 라인: 공급가액(부가세 제외)
+                elif l_type in ("REV", "EXP", "COG"):
+                    # ▶ 수익·비용·매출원가 라인: 공급가액(부가세 제외)
                     line["bizamt"], line["biztax"] = base, 0
                 elif l_type == "TAX":
                     # ▶ 세금 라인: 부가세액
@@ -1586,6 +1858,9 @@ class ThrooHybridEngine:
                 # AR/AP(거래처 마스터), TAX 라인 및 이미 거래처 잠금된 라인은 제외.
                 # 대변(C)이면서 현금 계정(glmaster='100000' 또는 glname에 '현금' 포함)인 라인도 제외:
                 # 소액현금지출·운반비 등에서 대변 현금을 의도치 않게 덮어쓰는 것을 방지.
+                # ★ pattern_id 성역 보호: 벡터 DB 패턴이 매칭되었다면 문장 전체 맥락으로
+                #   '정석 분개'가 이미 확정된 것이므로, 단순 단어 탐지(Intent Override)가
+                #   확정된 계정(예: 상품매출 410000)을 덮어쓰지 못하도록 완전 차단한다.
                 _is_cash_credit = (
                     line.get("debcre") == "C"
                     and (
@@ -1594,6 +1869,7 @@ class ThrooHybridEngine:
                     )
                 )
                 if (intent_gl_map
+                        and not pattern_id
                         and not line.get("biz_gl_locked")
                         and not _is_cash_credit
                         and l_type not in ["AR", "AP", "TAX"]):
@@ -1609,20 +1885,20 @@ class ThrooHybridEngine:
                             logger.info(f"Intent override → {gl_code} ({gl_info['glname1']}) on {l_type} line")
                             break
 
-                # ★ 만기일(duedt) — GL 검증 완료 후 gltype + 계정코드 기반 최종 결정
-                # t_cglmst.gltype = 'C'(고객 오픈아이템) / 'S'(공급업체 오픈아이템)만 만기일 허용.
-                # 예외: 215000(선수금) 계정은 gltype=""이지만 계약 이행일 관리 목적으로 만기일 활성화.
+                # ★ 만기일(duedt) — GL 검증 완료 후 계정코드 우선, gltype 순으로 결정
+                # 215000(선수금)은 gltype="C"이지만 전기일 폴백 로직이 필요하므로 먼저 처리.
                 _fgt = line.get("gltype", "")
                 _is_adv_gl = (line.get("glmaster", "") == "215000")
-                if _fgt in ("C", "S"):
-                    line["duedt"]            = line.get("due_date", "") or due_date
-                    line["due_date_enabled"] = True
-                elif _is_adv_gl:
-                    # 선수금(215000): 1순위=AI 추출 due_date, 2순위=전기일자(result_json["date"])
+                if _is_adv_gl:
+                    # 선수금(215000): 1순위=AI 추출, 2순위=헤더 due_date, 3순위=전기일자
+                    # gltype이 "C"로 바뀌어도 이 분기가 먼저 실행되어 전기일 폴백을 보장한다.
                     _adv_due = line.get("due_date", "") or due_date or result_json.get("date", "")
                     line["duedt"]            = _adv_due if not self.is_empty_value(_adv_due) else result_json.get("date", "")
                     line["due_date_enabled"] = True
                     logger.info(f"[선수금] duedt 자동 설정: '{line['duedt']}' (AI='{line.get('due_date','')}' / 전기일='{result_json.get('date','')}')")
+                elif _fgt in ("C", "S"):
+                    line["duedt"]            = line.get("due_date", "") or due_date
+                    line["due_date_enabled"] = True
                 else:
                     line["duedt"]            = ""
                     line["due_date_enabled"] = False
@@ -1652,12 +1928,13 @@ class ThrooHybridEngine:
                         if _al_dc == "C" and _al_type not in ("TAX",) and not _adv_applied:
                             _al["glmaster"]      = "215000"
                             _al["glname"]        = _adv_row.glname1 or "선수금"
-                            _al["gltype"]        = ""          # 선수금은 오픈아이템 아님
-                            _al["biz_gl_locked"] = True        # 후속 Override 차단
+                            # gltype="C": 고객 오픈아이템 → mainai.py에서 C1/t_cbody_o로 라우팅
+                            _al["gltype"]        = "C"
+                            _al["biz_gl_locked"] = True        # 후속 Override·PHASE 0-X 차단
                             _al["source"]        = "규칙 반영"
                             _al["type"]          = "EXP"       # 안분 로직상 base 금액 사용
                             _adv_applied = True
-                            logger.info(f"[선수금] 대변 라인 → 215000({_adv_row.glname1}) 강제 고정")
+                            logger.info(f"[선수금] 대변 라인 → 215000({_adv_row.glname1}), gltype=C 강제 고정")
 
                     if _adv_applied:
                         result_json["mulky"]           = "A"
@@ -1682,6 +1959,98 @@ class ThrooHybridEngine:
                     logger.warning("[선수금] t_cglmst에 215000 미등록 → 선수금 Override 건너뜀")
 
             # ══════════════════════════════════════════════════════════════════
+            # ── PHASE 0-ADV-SI: 선급금(계약금 지급) 차변 계정 강제 고정 ──────────
+            #
+            # 조건: SI/GL 전표 + 선급금 키워드 + AP방향 키워드(flag_advance_purchase)
+            # 동작: ① 차변(D) 라인 중 TAX 제외 첫 번째 → glmaster=120000, gltype='S' 고정
+            #         biz_gl_locked=True로 후속 Intent Override·PHASE 0-X 차단
+            #       ② 대변(C) 라인 → biz_suppgl(거래처 기본 AP GL) 동적 매핑
+            #          biz_suppgl 없으면 210000(외상매입금) 폴백
+            #       ③ mulky='A', doctyp='SI', advance_purchase=True 확정
+            #       ④ taxcd='PX00'(매입-세금무관) 초기 세팅 (DB 없으면 기본 레이블 사용)
+            # ── 주의: effective_docty는 벡터 DB 오염 가능 → flag(Python 키워드 분석) 우선 ──
+            # ══════════════════════════════════════════════════════════════════
+            if flag_advance_purchase:
+                _adv_pur_row = db.execute(
+                    text("SELECT glmaster, glname1 FROM t_cglmst WHERE comcd=:c AND glmaster='120000' LIMIT 1"),
+                    {"c": comcd},
+                ).fetchone()
+
+                if _adv_pur_row:
+                    _adv_pur_applied = False
+                    for _pl in result_json.get("lines", []):
+                        _pl_type = _pl.get("type", "").upper()
+                        _pl_dc   = _pl.get("debcre", "")
+                        # 차변(D) 이면서 TAX가 아닌 첫 번째 라인을 120000으로 교체
+                        if _pl_dc == "D" and _pl_type not in ("TAX",) and not _adv_pur_applied:
+                            _pl["glmaster"]      = "120000"
+                            _pl["glname"]        = _adv_pur_row.glname1 or "선급금"
+                            # gltype='S': AP 보조원장(t_sbody_o) 라우팅 키
+                            _pl["gltype"]        = "S"
+                            _pl["biz_gl_locked"] = True   # 후속 Override·PHASE 0-X 차단
+                            _pl["source"]        = "규칙 반영"
+                            _pl["type"]          = "EXP"  # 안분 로직상 base 금액 사용
+                            _adv_pur_applied = True
+                            logger.info(
+                                f"[선급금] 차변 라인 → 120000({_adv_pur_row.glname1}), gltype=S 강제 고정"
+                            )
+
+                    if _adv_pur_applied:
+                        # 대변(C) 라인: biz_suppgl(거래처 기본 AP GL) 동적 매핑
+                        if biz_suppgl:
+                            _supp_gl = biz_suppgl
+                            _supp_nm_row = db.execute(
+                                text("SELECT glname1 FROM t_cglmst WHERE comcd=:c AND glmaster=:g LIMIT 1"),
+                                {"c": comcd, "g": _supp_gl},
+                            ).fetchone()
+                            _supp_nm   = _supp_nm_row.glname1 if _supp_nm_row else "외상매입금"
+                            _supp_src  = "biz_suppgl"
+                        else:
+                            # biz_suppgl 미등록 → 210000(외상매입금) 폴백
+                            _supp_fb = db.execute(
+                                text("SELECT glmaster, glname1 FROM t_cglmst WHERE comcd=:c AND glmaster='210000' LIMIT 1"),
+                                {"c": comcd},
+                            ).fetchone()
+                            _supp_gl  = _supp_fb.glmaster if _supp_fb else ""
+                            _supp_nm  = _supp_fb.glname1  if _supp_fb else "외상매입금"
+                            _supp_src = "폴백(210000)"
+
+                        if _supp_gl:
+                            for _pl in result_json.get("lines", []):
+                                if _pl.get("debcre") == "C" and _pl.get("type", "").upper() not in ("TAX",):
+                                    _pl["glmaster"]      = _supp_gl
+                                    _pl["glname"]        = _supp_nm
+                                    _pl["gltype"]        = "S"
+                                    _pl["biz_gl_locked"] = True
+                                    _pl["source"]        = "규칙 반영"
+                                    logger.info(
+                                        f"[선급금] 대변 라인 → {_supp_gl}({_supp_nm}), {_supp_src} 동적 매핑"
+                                    )
+                                    break
+                        else:
+                            logger.warning("[선급금] biz_suppgl·210000 모두 미등록 → 대변 계정 빈값 처리")
+
+                        result_json["mulky"]            = "A"
+                        result_json["advance_purchase"] = True
+                        result_json["doctyp"]           = "SI"
+                        effective_docty                 = "SI"
+
+                        # PX00(매입-세금무관) 세팅: DB 존재 여부와 무관하게 UI 표시용으로 항상 세팅
+                        _px_meta = db.execute(
+                            text("SELECT taxnm FROM t_ctxkey WHERE comcd=:c AND taxcd='PX00' LIMIT 1"),
+                            {"c": comcd},
+                        ).fetchone()
+                        result_json["taxcd"] = "PX00"
+                        result_json["taxnm"] = (_px_meta.taxnm if _px_meta else None) or "세금무관"
+                        logger.info(
+                            f"[선급금] mulky='A', taxcd='PX00', taxnm='{result_json['taxnm']}'"
+                        )
+                    else:
+                        logger.warning("[선급금] 차변 라인을 찾지 못해 Override 건너뜀")
+                else:
+                    logger.warning("[선급금] t_cglmst에 120000 미등록 → 선급금 Override 건너뜀")
+
+            # ══════════════════════════════════════════════════════════════════
             # ── PHASE 0-X: 명시 계정 파이썬 강제 보정 (LLM 2차 방어선) ──────────
             #
             # LLM이 XML CRITICAL_OVERRIDE를 무시하고 다른 계정을 반환했을 경우,
@@ -1696,72 +2065,97 @@ class ThrooHybridEngine:
             # is_opposite_entry가 True면 D/C가 이미 Swap된 상태이므로 방향을 반전하여 적용.
             # ══════════════════════════════════════════════════════════════════
             if explicit_gl_match:
-                _xcode  = explicit_gl_match["glmaster"]
-                _xname  = explicit_gl_match["glname1"]
-                _xtype  = explicit_gl_match.get("gltype", "")
-                _xlines = result_json.get("lines", [])
-                # PHASE 0-R 이전이므로 result_json["is_opposite_entry"]은 아직 미설정.
-                # 사전 감지된 is_opposite_entry 변수를 직접 참조.
-                _is_opposite_entry_now = is_opposite_entry
+                # ── pattern_id 우선 보호 ─────────────────────────────────────────
+                # 벡터 DB(t_v_user_learn) 패턴이 매칭된 경우 문장 전체 맥락으로
+                # 이미 올바른 계정(예: 상품매출 410000)이 확정된 것이므로,
+                # 단순히 문장 속 단어("상품")에 반응하는 명시 계정 보정을 차단한다.
+                # 예) "상품 판매" → explicit_gl_match=상품(130010) 이지만
+                #     pattern_id로 상품매출(410000)이 확정된 경우 130010으로 덮어쓰면 안 됨.
+                if pattern_id:
+                    logger.info(
+                        f"[PHASE 0-X] pattern_id={pattern_id} 벡터 DB 패턴 우선 → "
+                        f"명시 계정 보정 건너뜀 "
+                        f"(explicit_gl_match={explicit_gl_match.get('glmaster','')} "
+                        f"'{explicit_gl_match.get('glname1','')}' 차단)"
+                    )
+                else:
+                    _xcode  = explicit_gl_match["glmaster"]
+                    _xname  = explicit_gl_match["glname1"]
+                    _xtype  = explicit_gl_match.get("gltype", "")
+                    _xlines = result_json.get("lines", [])
+                    # PHASE 0-R 이전이므로 result_json["is_opposite_entry"]은 아직 미설정.
+                    # 사전 감지된 is_opposite_entry 변수를 직접 참조.
+                    _is_opposite_entry_now = is_opposite_entry
 
-                # 현재 문맥 재판별 (post-processing 시점)
-                _post_ap = effective_docty in ("SI", "GL") or any(
-                    kw in raw_text for kw in ['구매', '매입', '지급', '발주', '구입', '비용', '결제']
-                )
-                _post_ar = effective_docty == "CI" or any(
-                    kw in raw_text for kw in ['매출', '판매', '납품', '청구', '수금']
-                )
+                    # 현재 문맥 재판별 (post-processing 시점)
+                    _post_ap = effective_docty in ("SI", "GL") or any(
+                        kw in raw_text for kw in ['구매', '매입', '지급', '발주', '구입', '비용', '결제']
+                    )
+                    _post_ar = effective_docty == "CI" or any(
+                        kw in raw_text for kw in ['매출', '판매', '납품', '청구', '수금']
+                    )
 
-                # 반대분개(Opposite Entry)면 D/C 이미 Swap됨 → 대상 방향도 반전
-                _target_side = "D"  # AP: 차변 라인을 교정
-                if _post_ar and not _post_ap:
-                    _target_side = "C"  # AR: 대변 라인을 교정
-                if _is_opposite_entry_now:
-                    _target_side = "C" if _target_side == "D" else "D"
+                    # 반대분개(Opposite Entry)면 D/C 이미 Swap됨 → 대상 방향도 반전
+                    _target_side = "D"  # AP: 차변 라인을 교정
+                    if _post_ar and not _post_ap:
+                        _target_side = "C"  # AR: 대변 라인을 교정
+                    if _is_opposite_entry_now:
+                        _target_side = "C" if _target_side == "D" else "D"
 
-                # 교정 제외 type 목록 (AP/AR 오픈아이템, 부가세 라인은 건드리지 않음)
-                _SKIP_TYPES = {"AP", "AR", "TAX"}
+                    # 교정 제외 type 목록 (AP/AR 오픈아이템, 부가세 라인은 건드리지 않음)
+                    _SKIP_TYPES = {"AP", "AR", "TAX"}
 
-                _override_target = None
-                # 1순위: EXP 또는 REV 타입 라인
-                for _l in _xlines:
-                    if _l.get("debcre") != _target_side:
-                        continue
-                    if _l.get("type", "").upper() in {"EXP", "REV"}:
-                        _override_target = _l
-                        break
-                # 2순위: SKIP_TYPES가 아닌 첫 번째 라인
-                if not _override_target:
+                    _override_target = None
+                    # 1순위: EXP, REV, COG 타입 라인 (biz_gl_locked 성역 제외)
                     for _l in _xlines:
                         if _l.get("debcre") != _target_side:
                             continue
-                        if _l.get("type", "").upper() not in _SKIP_TYPES:
+                        if _l.get("biz_gl_locked"):           # ← 선수금/선급금/거래처 마스터 계정 보호
+                            continue
+                        if _l.get("type", "").upper() in {"EXP", "REV", "COG"}:
                             _override_target = _l
                             break
+                    # 2순위: SKIP_TYPES가 아닌 첫 번째 라인 (biz_gl_locked 성역 제외)
+                    if not _override_target:
+                        for _l in _xlines:
+                            if _l.get("debcre") != _target_side:
+                                continue
+                            if _l.get("biz_gl_locked"):       # ← 선수금/선급금/거래처 마스터 계정 보호
+                                continue
+                            if _l.get("type", "").upper() not in _SKIP_TYPES:
+                                _override_target = _l
+                                break
 
-                if _override_target:
-                    _old_code = _override_target.get("glmaster", "")
-                    _old_name = _override_target.get("glname", "")
-                    if _old_code != _xcode:
-                        _override_target["glmaster"] = _xcode
-                        _override_target["glname"]   = _xname
-                        if _xtype:
-                            _override_target["gltype"] = _xtype
-                        _override_target["source"]   = "규칙 반영"
-                        logger.info(
-                            f"[PHASE 0-X] 명시 계정 강제 보정: "
-                            f"{_old_code}({_old_name}) → {_xcode}({_xname}) "
-                            f"[debcre={_target_side}, type={_override_target.get('type','')}]"
-                        )
+                    if _override_target:
+                        # ── 최종 안전망: biz_gl_locked 라인은 어떤 경로로도 변경 불가 ──
+                        if _override_target.get("biz_gl_locked"):
+                            logger.info(
+                                f"[PHASE 0-X] biz_gl_locked=True → 계정 보정 차단 "
+                                f"(protected glmaster={_override_target.get('glmaster','')})"
+                            )
+                        else:
+                            _old_code = _override_target.get("glmaster", "")
+                            _old_name = _override_target.get("glname", "")
+                            if _old_code != _xcode:
+                                _override_target["glmaster"] = _xcode
+                                _override_target["glname"]   = _xname
+                                if _xtype:
+                                    _override_target["gltype"] = _xtype
+                                _override_target["source"]   = "규칙 반영"
+                                logger.info(
+                                    f"[PHASE 0-X] 명시 계정 강제 보정: "
+                                    f"{_old_code}({_old_name}) → {_xcode}({_xname}) "
+                                    f"[debcre={_target_side}, type={_override_target.get('type','')}]"
+                                )
+                            else:
+                                logger.info(
+                                    f"[PHASE 0-X] LLM이 이미 올바른 계정({_xcode}) 사용 → 보정 불필요"
+                                )
                     else:
-                        logger.info(
-                            f"[PHASE 0-X] LLM이 이미 올바른 계정({_xcode}) 사용 → 보정 불필요"
+                        logger.warning(
+                            f"[PHASE 0-X] 교정 대상 라인을 찾지 못함 "
+                            f"(target_side={_target_side}, lines={[l.get('debcre') for l in _xlines]})"
                         )
-                else:
-                    logger.warning(
-                        f"[PHASE 0-X] 교정 대상 라인을 찾지 못함 "
-                        f"(target_side={_target_side}, lines={[l.get('debcre') for l in _xlines]})"
-                    )
 
             # ══════════════════════════════════════════════════════════════════
             # ── PHASE 0: 사비 대납(Out-of-Pocket) 강제 Override ───────────────
@@ -1790,18 +2184,19 @@ class ThrooHybridEngine:
 
                 # 새 미지급금 대변 라인 생성
                 _mj_line = {
-                    "debcre":   "C",
-                    "glmaster": "211000",
-                    "glname":   "미지급금",
-                    "gltype":   "S",
-                    "type":     "AP",
-                    "bizamt":   _oop_amt,
-                    "biztax":   0,
-                    "text":     "사비 대납 미지급금",
-                    "source":   "규칙 반영",
-                    "pctrcd":   result_json.get("pctrcd", ""),
-                    "anakey":   result_json.get("manaky", ""),
-                    "duedt":    "",
+                    "debcre":       "C",
+                    "glmaster":     "211000",
+                    "glname":       "미지급금",
+                    "gltype":       "S",
+                    "type":         "AP",
+                    "bizamt":       _oop_amt,
+                    "biztax":       0,
+                    "text":         "사비 대납 미지급금",
+                    "source":       "규칙 반영",
+                    "biz_gl_locked": True,   # 사비 대납 강제 생성 라인 → 후속 보정 차단
+                    "pctrcd":       result_json.get("pctrcd", ""),
+                    "anakey":       result_json.get("manaky", ""),
+                    "duedt":        "",
                 }
 
                 # 기존 라인에서 대변 라인을 모두 제거하고 새 미지급금 라인으로 교체
@@ -1942,9 +2337,16 @@ class ThrooHybridEngine:
             # ── PHASE C: header_field_control 생성 ─────────────────────────
             # 결제 수단·전표 유형에 따라 헤더 필드 제어 객체를 정밀 구성.
             # 우선순위: ① 법인카드  ② 사비 대납  ③ SI/CI 공통  ④ GL/기타
+            #
+            # ★ 실행 순서 보장:
+            #   PHASE A(GL→CI/SI 강제 전환)와 PHASE 0-ADV(선수금 CI 세팅)는
+            #   반드시 이 블록 이전에 완료된다.
+            #   따라서 아래 _final_doctyp은 모든 자동 전환이 반영된 최종 전표 유형이다.
+            #   GL이 CI로 전환된 경우에도 tax_invoice_date WARNING_YELLOW가 올바르게 적용된다.
             # ══════════════════════════════════════════════════════════════════
             _hfc: dict = {}
             _final_doctyp = result_json.get("doctyp", "GL")
+            logger.info(f"[PHASE C] 진입 — 최종 doctyp='{_final_doctyp}' (PHASE A/0-ADV 전환 반영 완료)")
 
             # ── ① 법인카드 확정 ────────────────────────────────────────────
             if flag_corp_card:
@@ -2007,8 +2409,15 @@ class ThrooHybridEngine:
                     }
                     logger.info("[PHASE C][선수금] tax_invoice_date DISABLED, taxcode=SX EDITABLE 확정")
                 else:
-                    # 일반 매출전표: 세금계산서 발행일 입력 허용
-                    _hfc["tax_invoice_date"] = {"status": "EDITABLE", "msg": ""}
+                    # 일반 매출전표: 세금계산서 발행일 — 비어있으면 Yellow Warning
+                    _tid_val = result_json.get("tax_invoice_date", "")
+                    if self.is_empty_value(_tid_val):
+                        _hfc["tax_invoice_date"] = {
+                            "status": "WARNING_YELLOW",
+                            "msg":    "세금계산서 발행일이 누락되었습니다. 건별 발행이면 날짜를 입력하시고, 합계 발행 예정이면 비워두셔도 됩니다.",
+                        }
+                    else:
+                        _hfc["tax_invoice_date"] = {"status": "EDITABLE", "msg": ""}
                     # 세금코드: AI/매핑 결과에 유효한 값이 있으면 EDITABLE로 유지.
                     # LLM의 가짜 빈 값(" ", "-", "null" 등) 포함, 실질적으로 비어있으면 선택 필수.
                     _existing_taxcd = result_json.get("taxcd", "")
@@ -2038,23 +2447,37 @@ class ThrooHybridEngine:
 
             # ── ③-B SI (매입전표) ─────────────────────────────────────────
             elif _final_doctyp == "SI":
-                # 매입전표: 세금계산서 발행일은 입력 대상이 아님 → DISABLED + 데이터 초기화
+                _is_adv_pur = result_json.get("advance_purchase", False)
+
+                # 매입전표: 세금계산서 발행일은 입력 대상이 아님 → 항상 DISABLED
                 _hfc["tax_invoice_date"] = {
                     "status": "DISABLED",
                     "msg":    "매입전표(SI)는 세금계산서 발행일 입력 대상이 아닙니다.",
                 }
                 result_json["tax_invoice_date"] = ""
-                # 세금코드
-                _existing_taxcd = result_json.get("taxcd", "")
-                if not self.is_empty_value(_existing_taxcd):
-                    _hfc["taxcode"] = {"status": "EDITABLE", "msg": ""}
-                else:
-                    if _existing_taxcd != "":
-                        result_json["taxcd"] = ""
+
+                if _is_adv_pur:
+                    # 선급금(계약금 지급): 재화/용역 미수령 시점 → 세금계산서 수취 대상 아님
+                    result_json.setdefault("taxcd", "PX00")
+                    result_json.setdefault("taxnm", "세금무관")
                     _hfc["taxcode"] = {
-                        "status": "USER_SELECT_REQUIRED",
-                        "msg":    "매입 전표는 세금코드를 반드시 선택해주세요.",
+                        "status": "EDITABLE",
+                        "msg":    "선급금은 세금무관(PX00) 코드가 자동 설정되었습니다. 필요시 변경하세요.",
                     }
+                    logger.info("[PHASE C][선급금] tax_invoice_date DISABLED, taxcode=PX00 EDITABLE 확정")
+                else:
+                    # 일반 매입전표: 세금코드 필수 선택
+                    _existing_taxcd = result_json.get("taxcd", "")
+                    if not self.is_empty_value(_existing_taxcd):
+                        _hfc["taxcode"] = {"status": "EDITABLE", "msg": ""}
+                    else:
+                        if _existing_taxcd != "":
+                            result_json["taxcd"] = ""
+                        _hfc["taxcode"] = {
+                            "status": "USER_SELECT_REQUIRED",
+                            "msg":    "매입 전표는 세금코드를 반드시 선택해주세요.",
+                        }
+
                 # 거래처
                 _biz_status = result_json.get("biz_match_status", "NONE")
                 if _biz_status == "NONE" or not result_json.get("bizptcd"):
@@ -2119,9 +2542,35 @@ class ThrooHybridEngine:
                 )
                 _has_valid_duedt = not self.is_empty_value(_raw_duedt)
 
-                _is_adv_line = (line.get("glmaster", "") == "215000")
+                # ★ 215000(선수금)·120000(선급금) 체크를 gltype C/S보다 먼저 실행.
+                # gltype이 이미 C/S로 바뀌었어도 계정별 전용 WARNING_YELLOW가 올바르게 적용된다.
+                _is_adv_line     = (line.get("glmaster", "") == "215000")
+                _is_adv_pur_line = (line.get("glmaster", "") == "120000")
 
-                if _gt in ("C", "S"):
+                if _is_adv_line:
+                    # ── 선수금(215000) 전용: 계약 이행 예정일 ────────────────────
+                    # 라인 루프(★)에서 이미 duedt를 채웠으므로 클렌징 후 WARNING_YELLOW 반환.
+                    line["due_date_enabled"] = True
+                    _adv_duedt = line.get("duedt", "")
+                    if self.is_empty_value(_adv_duedt):
+                        _adv_duedt = result_json.get("date", "")
+                        line["duedt"] = _adv_duedt
+                    _lfc["due_date"] = {
+                        "status": "WARNING_YELLOW",
+                        "msg":    "계약 이행 예정일(만기일)을 확인해 주세요. 별도 언급이 없어 전기일자로 자동 설정되었습니다.",
+                    }
+                elif _is_adv_pur_line:
+                    # ── 선급금(120000) 전용: 대금 지급 예정일 ────────────────────
+                    line["due_date_enabled"] = True
+                    _adv_pur_duedt = line.get("duedt", "") or result_json.get("date", "")
+                    if self.is_empty_value(_adv_pur_duedt):
+                        _adv_pur_duedt = result_json.get("date", "")
+                    line["duedt"] = _adv_pur_duedt
+                    _lfc["due_date"] = {
+                        "status": "WARNING_YELLOW",
+                        "msg":    "대금 지급 예정일(만기일)을 확인해 주세요. 별도 언급이 없어 전기일자로 자동 설정되었습니다.",
+                    }
+                elif _gt in ("C", "S"):
                     line["due_date_enabled"] = True
                     if _has_valid_duedt:
                         line["duedt"] = _raw_duedt.strip()
@@ -2136,19 +2585,6 @@ class ThrooHybridEngine:
                             "status": "REQUIRED_RED",
                             "msg":    "채권/채무 관리가 필요한 '오픈아이템' 계정입니다. 정확한 만기 일자를 확인해 주세요.",
                         }
-                elif _is_adv_line:
-                    # ── 선수금(215000) 전용: 계약 이행 예정일 관리 ──────────────
-                    # 라인 루프(★)에서 이미 duedt를 채웠으므로 값 클렌징만 수행.
-                    # AI 추출값 없으면 전기일자가 이미 들어 있으므로 항상 EDITABLE.
-                    line["due_date_enabled"] = True
-                    _adv_duedt = line.get("duedt", "")
-                    if self.is_empty_value(_adv_duedt):
-                        _adv_duedt = result_json.get("date", "")
-                        line["duedt"] = _adv_duedt
-                    _lfc["due_date"] = {
-                        "status": "WARNING_YELLOW",
-                        "msg":    "계약 이행 예정일(만기일)을 확인해 주세요. 별도 언급이 없어 전기일자로 자동 설정되었습니다.",
-                    }
                 elif _gt == "A":
                     line["duedt"]            = ""
                     line["due_date_enabled"] = False
@@ -2170,7 +2606,7 @@ class ThrooHybridEngine:
                 elif line.get("biz_gl_locked"):
                     _lfc["account_code"] = {
                         "status": "DISABLED",
-                        "msg":    "선수금(계약금) 대변 계정은 재화/용역 제공 전까지 변경할 수 없습니다.",
+                        "msg":    "선수금/선급금(계약금) 계정은 재화/용역 인도 전까지 변경할 수 없습니다.",
                     }
                 else:
                     _lfc["account_code"] = {"status": "EDITABLE", "msg": ""}

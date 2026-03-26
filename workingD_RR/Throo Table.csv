@@ -1,0 +1,600 @@
+"table_name","id","column_name","is_pk","data_type","length","is_nullable","column_default","column_comment"
+"t_aclose",1,"comcd","PK","character",10,"NO",NULL,NULL
+"t_aclose",2,"gubun","PK","character",2,"NO",NULL,NULL
+"t_aclose",3,"frprd","","character varying",8,"NO",NULL,NULL
+"t_aclose",4,"enprd","","character varying",8,"NO",NULL,NULL
+"t_aclose",5,"actprd","","character varying",8,"YES",NULL,NULL
+"t_aclose",6,"actend","","character varying",8,"YES",NULL,NULL
+"t_aclose",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ai_log",1,"log_id","PK","bigint",NULL,"NO","nextval('t_ai_log_log_id_seq'::regclass)",NULL
+"t_ai_log",2,"comcd","","character varying",10,"NO",NULL,NULL
+"t_ai_log",3,"user_id","","character varying",20,"NO",NULL,NULL
+"t_ai_log",4,"input_at","","timestamp with time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ai_log",5,"raw_text","","text",NULL,"NO",NULL,NULL
+"t_ai_log",6,"ai_json","","jsonb",NULL,"NO",NULL,NULL
+"t_ai_log",7,"is_modified","","boolean",NULL,"YES","false",NULL
+"t_ai_log",8,"final_slip_no","","character varying",20,"YES",NULL,NULL
+"t_ai_log",9,"status","","character varying",10,"YES","'SUCCESS'::character varying",NULL
+"t_ai_log",10,"error_msg","","text",NULL,"YES",NULL,NULL
+"t_ai_log",11,"match_score","","numeric",NULL,"YES",NULL,NULL
+"t_anatype",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_anatype",2,"ana_type","PK","character varying",10,"NO",NULL,NULL
+"t_anatype",3,"ana_name","","character varying",50,"NO",NULL,NULL
+"t_anatype",4,"level1_nm","","character varying",20,"YES","'대분류'::character varying",NULL
+"t_anatype",5,"level2_nm","","character varying",20,"YES","'중분류'::character varying",NULL
+"t_cauth",1,"login","PK","character varying",10,"NO",NULL,NULL
+"t_cauth",2,"seq","PK","numeric",NULL,"NO",NULL,NULL
+"t_cauth",3,"btype","PK","character",5,"NO",NULL,NULL
+"t_cauth",4,"mtype","PK","character",8,"NO",NULL,NULL
+"t_cauth",5,"stype","","character varying",13,"YES",NULL,NULL
+"t_cauth",6,"name","","character varying",20,"YES",NULL,NULL
+"t_cauth",7,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_cauth",8,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cbizpt",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbizpt",2,"bizptcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbizpt",3,"bizname1","","character varying",50,"NO",NULL,NULL
+"t_cbizpt",4,"bizname2","","character varying",50,"YES",NULL,NULL
+"t_cbizpt",5,"bizadd1","","character varying",70,"NO",NULL,NULL
+"t_cbizpt",6,"bizadd2","","character varying",70,"YES",NULL,NULL
+"t_cbizpt",7,"bizpostcd","","character varying",6,"YES",NULL,NULL
+"t_cbizpt",8,"bizctry","","character varying",2,"YES","'KR'::character varying",NULL
+"t_cbizpt",9,"bizphone1","","character varying",20,"YES",NULL,NULL
+"t_cbizpt",10,"bizphone2","","character varying",20,"YES",NULL,NULL
+"t_cbizpt",11,"bizemail1","","character varying",30,"YES",NULL,NULL
+"t_cbizpt",12,"bizemail2","","character varying",30,"YES",NULL,NULL
+"t_cbizpt",13,"bizfax","","character varying",30,"YES",NULL,NULL
+"t_cbizpt",14,"bizceo","","character varying",20,"NO",NULL,NULL
+"t_cbizpt",15,"bizjong","","character varying",50,"NO",NULL,NULL
+"t_cbizpt",16,"biztae","","character varying",50,"NO",NULL,NULL
+"t_cbizpt",17,"biztax1","","character varying",13,"YES",NULL,NULL
+"t_cbizpt",18,"biztax2","","character varying",10,"NO",NULL,NULL
+"t_cbizpt",19,"biztax3","","character varying",10,"YES",NULL,NULL
+"t_cbizpt",20,"biztxname1","","character varying",20,"NO",NULL,NULL
+"t_cbizpt",21,"biztxemail1","","character varying",30,"NO",NULL,NULL
+"t_cbizpt",22,"biztxname2","","character varying",20,"YES",NULL,NULL
+"t_cbizpt",23,"biztxemail2","","character varying",30,"YES",NULL,NULL
+"t_cbizpt",24,"suppgl","","character varying",6,"YES",NULL,NULL
+"t_cbizpt",25,"suppterm","","character",4,"YES",NULL,NULL
+"t_cbizpt",26,"suppmth","","character",1,"YES",NULL,NULL
+"t_cbizpt",27,"custgl","","character varying",6,"YES",NULL,NULL
+"t_cbizpt",28,"custterm","","character",4,"YES",NULL,NULL
+"t_cbizpt",29,"custmth","","character",1,"YES",NULL,NULL
+"t_cbizpt",30,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_cbizpt",31,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cbkey",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbkey",2,"ana_type","PK","character varying",10,"NO",NULL,NULL
+"t_cbkey",3,"banaky","PK","character",8,"NO",NULL,NULL
+"t_cbkey",4,"bananm","","character varying",30,"NO",NULL,NULL
+"t_cbody_c",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_c",2,"custcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_c",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_cbody_c",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_cbody_c",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_c",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_cbody_c",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_c",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_cbody_c",9,"docty","","character",2,"NO",NULL,NULL
+"t_cbody_c",10,"invdt","","date",NULL,"NO",NULL,NULL
+"t_cbody_c",11,"posdt","","date",NULL,"NO",NULL,NULL
+"t_cbody_c",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_cbody_c",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_cbody_c",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_cbody_c",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_c",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_c",17,"curren","","character",3,"NO",NULL,NULL
+"t_cbody_c",18,"bookey","","character",2,"YES",NULL,NULL
+"t_cbody_c",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_cbody_c",20,"debcre","","character",1,"NO",NULL,NULL
+"t_cbody_c",21,"glmaster","","character varying",6,"NO",NULL,NULL
+"t_cbody_c",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_cbody_c",23,"pmethod","","character varying",10,"YES",NULL,NULL
+"t_cbody_c",24,"pblck","","character",1,"YES",NULL,NULL
+"t_cbody_c",25,"pterm","","character",4,"YES",NULL,NULL
+"t_cbody_c",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_cbody_c",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_c",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_cbody_c",29,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_c",30,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_cbody_c",31,"locamt","","numeric",NULL,"YES","0",NULL
+"t_cbody_c",32,"biztax","","numeric",NULL,"YES","0",NULL
+"t_cbody_c",33,"loctax","","numeric",NULL,"YES","0",NULL
+"t_cbody_c",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_cbody_c",35,"pctrcd","","character varying",10,"YES",NULL,NULL
+"t_cbody_c",36,"cctrcd","","character varying",10,"YES",NULL,NULL
+"t_cbody_c",37,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cbody_o",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_o",2,"custcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_o",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_cbody_o",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_cbody_o",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_o",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_cbody_o",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_cbody_o",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_cbody_o",9,"docty","","character",2,"YES",NULL,NULL
+"t_cbody_o",10,"invdt","","date",NULL,"YES",NULL,NULL
+"t_cbody_o",11,"posdt","","date",NULL,"YES",NULL,NULL
+"t_cbody_o",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_cbody_o",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_cbody_o",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_cbody_o",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_o",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_o",17,"curren","","character varying",3,"YES",NULL,NULL
+"t_cbody_o",18,"bookey","","character",2,"YES",NULL,NULL
+"t_cbody_o",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_cbody_o",20,"debcre","","character",1,"YES",NULL,NULL
+"t_cbody_o",21,"glmaster","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_o",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_cbody_o",23,"pmethod","","character varying",10,"YES",NULL,NULL
+"t_cbody_o",24,"pblck","","character",1,"YES",NULL,NULL
+"t_cbody_o",25,"pterm","","character",4,"YES",NULL,NULL
+"t_cbody_o",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_cbody_o",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_o",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_cbody_o",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_cbody_o",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_cbody_o",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_cbody_o",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_cbody_o",33,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_cbody_o",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_cbody_o",35,"pctrcd","","character varying",10,"YES",NULL,NULL
+"t_cbody_o",36,"cctrcd","","character varying",10,"YES",NULL,NULL
+"t_cbudget",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbudget",2,"yymm","PK","character varying",6,"NO",NULL,NULL
+"t_cbudget",3,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_cbudget",4,"cctrcd","PK","character varying",10,"NO",NULL,NULL
+"t_cbudget",5,"currency","PK","character",3,"NO","'KRW'::bpchar","예산 책정 통화 단위 (ISO 코드)"
+"t_cbudget",6,"bdgamt","","numeric",NULL,"YES","0",NULL
+"t_cbudget",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cdocnum",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cdocnum",2,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_cdocnum",3,"doctype","PK","character",2,"NO",NULL,NULL
+"t_cdocnum",4,"doctext","","character varying",30,"YES",NULL,NULL
+"t_cdocnum",5,"frnum","","numeric",NULL,"NO",NULL,NULL
+"t_cdocnum",6,"tonum","","numeric",NULL,"NO",NULL,NULL
+"t_cdocnum",7,"maxnum","","numeric",NULL,"NO",NULL,NULL
+"t_cdocnum",8,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cglmst",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cglmst",2,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_cglmst",3,"glname1","","character varying",20,"NO",NULL,NULL
+"t_cglmst",4,"glname2","","character varying",50,"YES",NULL,NULL
+"t_cglmst",5,"indbspl","","character",1,"NO",NULL,NULL
+"t_cglmst",6,"currency","","character",3,"YES","'KRW'::bpchar",NULL
+"t_cglmst",7,"balyn","","character",1,"YES","'N'::bpchar",NULL
+"t_cglmst",8,"taxtype","","character",1,"YES",NULL,NULL
+"t_cglmst",9,"notxpt","","character",1,"YES","'X'::bpchar",NULL
+"t_cglmst",10,"eachitem","","character",1,"YES",NULL,NULL
+"t_cglmst",11,"gltype","","character",1,"YES",NULL,NULL
+"t_cglmst",12,"autopost","","character",1,"YES",NULL,NULL
+"t_cglmst",13,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_cglmst",14,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cobank",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cobank",2,"bctry","PK","character",2,"NO",NULL,NULL
+"t_cobank",3,"bankcd","PK","character varying",20,"NO",NULL,NULL
+"t_cobank",4,"branch","PK","character varying",20,"NO",NULL,NULL
+"t_cobank",5,"bookid","PK","character varying",20,"NO",NULL,NULL
+"t_cobank",6,"bnknm","","character varying",50,"YES",NULL,NULL
+"t_cobank",7,"brchnm","","character varying",50,"NO",NULL,NULL
+"t_cobank",8,"booknm","","character varying",50,"NO",NULL,NULL
+"t_cobank",9,"acctno","","character varying",30,"NO",NULL,NULL
+"t_cobank",10,"currency","","character",3,"YES","'KRW'::character varying",NULL
+"t_cobank",11,"gl","","character varying",10,"NO",NULL,NULL
+"t_cobank",12,"moacct","","character",1,"YES","'N'::bpchar",NULL
+"t_cobank",13,"text","","character varying",100,"YES",NULL,NULL
+"t_cobank",14,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_cobank",15,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_company",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_company",2,"cname","","character varying",100,"NO",NULL,NULL
+"t_company",3,"citycd","","character varying",30,"NO",NULL,NULL
+"t_company",4,"country","","character varying",6,"YES",NULL,NULL
+"t_company",5,"chartcd","","character varying",7,"YES",NULL,NULL
+"t_company",6,"postcd","","character varying",6,"YES",NULL,NULL
+"t_company",7,"address","","character varying",300,"NO",NULL,NULL
+"t_company",8,"taxcd1","","character varying",20,"YES",NULL,NULL
+"t_company",9,"taxcd2","","character varying",10,"NO",NULL,NULL
+"t_company",10,"taxcd3","","character varying",30,"YES",NULL,NULL
+"t_company",11,"taxcd4","","character varying",30,"YES",NULL,NULL
+"t_company",12,"ceo","","character varying",20,"YES",NULL,NULL
+"t_company",13,"upjong","","character varying",50,"YES",NULL,NULL
+"t_company",14,"uptae","","character varying",50,"YES",NULL,NULL
+"t_company",15,"email1","","character varying",30,"NO",NULL,NULL
+"t_company",16,"emial2","","character varying",30,"YES",NULL,NULL
+"t_company",17,"empnm1","","character varying",20,"NO",NULL,NULL
+"t_company",18,"empnm2","","character varying",20,"YES",NULL,NULL
+"t_company",19,"phone1","","character varying",30,"NO",NULL,NULL
+"t_company",20,"phone2","","character varying",30,"YES",NULL,NULL
+"t_company",21,"faxno1","","character varying",30,"YES",NULL,NULL
+"t_company",22,"login","","character varying",10,"YES",NULL,NULL
+"t_company",23,"pwdcd","","character varying",30,"YES",NULL,NULL
+"t_company",24,"mocomcd","","character varying",10,"YES",NULL,NULL
+"t_company",25,"package","","character varying",3,"NO",NULL,NULL
+"t_company",26,"packnm","","character varying",20,"YES",NULL,NULL
+"t_company",27,"taxinv","","character",1,"YES","'Y'::bpchar",NULL
+"t_company",28,"taxcnt","","numeric",NULL,"YES",NULL,NULL
+"t_company",29,"corpcard","","character",1,"YES","'Y'::bpchar",NULL
+"t_company",30,"corpcnt","","numeric",NULL,"YES",NULL,NULL
+"t_company",31,"bizyn","","character",1,"YES","'N'::bpchar",NULL
+"t_company",32,"scrapyn","","character",1,"YES","'N'::bpchar",NULL
+"t_company",33,"curren","","character varying",5,"NO",NULL,NULL
+"t_company",34,"owrate","","character",1,"YES","'X'::bpchar",NULL
+"t_company",35,"budget","","character",1,"YES","'X'::bpchar",NULL
+"t_company",36,"created_at","","timestamp with time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cprocos",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cprocos",2,"pctrcd","PK","character varying",10,"NO",NULL,NULL
+"t_cprocos",3,"prcrnm","","character varying",30,"NO",NULL,NULL
+"t_cprocos",4,"pctrman","","character varying",20,"YES",NULL,NULL
+"t_cprocos",5,"upteam","","character varying",10,"YES",NULL,NULL
+"t_cprocos",6,"prcrcat","","character",1,"YES",NULL,NULL
+"t_cprocos",7,"bizcat","","character",4,"YES",NULL,NULL
+"t_cprocos",8,"macarea","","numeric",NULL,"YES",NULL,NULL
+"t_cprocos",9,"currency","","character",3,"YES","'KRW'::bpchar",NULL
+"t_cprocos",10,"ana_type","","character varying",10,"NO",NULL,NULL
+"t_cprocos",11,"manaky","","character",8,"YES",NULL,NULL
+"t_cprocos",12,"banaky","","character",8,"YES",NULL,NULL
+"t_cprocos",13,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ctax",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_ctax",2,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_ctax",3,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_ctax",4,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_ctax",5,"taxcd","","character varying",10,"NO",NULL,NULL
+"t_ctax",6,"debcre","","character",1,"NO",NULL,NULL
+"t_ctax",7,"vatbr","","character varying",4,"YES",NULL,"세무지점코드 (VAT Branch - 4자리 고정)"
+"t_ctax",8,"taxtyp","","character",2,"YES",NULL,NULL
+"t_ctax",9,"srcdoc","","character varying",10,"YES",NULL,NULL
+"t_ctax",10,"srcyr","","numeric",NULL,"YES",NULL,NULL
+"t_ctax",11,"srclin","","numeric",NULL,"YES",NULL,NULL
+"t_ctax",12,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_ctax",13,"locamt","","numeric",NULL,"YES","0",NULL
+"t_ctax",14,"biztax","","numeric",NULL,"YES","0",NULL
+"t_ctax",15,"loctax","","numeric",NULL,"YES","0",NULL
+"t_ctax",16,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ctxkey",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_ctxkey",2,"taxcd","PK","character varying",10,"NO",NULL,NULL
+"t_ctxkey",3,"taxnm","","character varying",50,"NO",NULL,NULL
+"t_ctxkey",4,"taxtyp","","character",1,"NO",NULL,NULL
+"t_ctxkey",5,"taxrate","","numeric",NULL,"YES","0",NULL
+"t_ctxkey",6,"currency","","character",3,"YES","'KRW'::bpchar",NULL
+"t_ctxkey",7,"glmaster","","character varying",6,"YES",NULL,NULL
+"t_ctxkey",8,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_ctxkey",9,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_cuserinfo",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_cuserinfo",2,"userid","PK","character varying",20,"NO",NULL,NULL
+"t_cuserinfo",3,"username","","character varying",50,"NO",NULL,NULL
+"t_cuserinfo",4,"pwdcd","","character varying",255,"NO",NULL,NULL
+"t_cuserinfo",5,"deptcd","","character varying",20,"YES",NULL,NULL
+"t_cuserinfo",6,"empno","","character varying",10,"YES",NULL,NULL
+"t_cuserinfo",7,"phone","","character varying",30,"YES",NULL,NULL
+"t_cuserinfo",8,"position","","character varying",20,"YES",NULL,NULL
+"t_cuserinfo",9,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_cuserinfo",10,"admin_yn","","character",1,"YES","'N'::bpchar",NULL
+"t_cuserinfo",11,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_gbody_c",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_c",2,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_gbody_c",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_gbody_c",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_gbody_c",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_c",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_gbody_c",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_c",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_gbody_c",9,"docty","","character",2,"NO",NULL,NULL
+"t_gbody_c",10,"invdt","","date",NULL,"NO",NULL,NULL
+"t_gbody_c",11,"posdt","","date",NULL,"NO",NULL,NULL
+"t_gbody_c",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_gbody_c",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_gbody_c",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_gbody_c",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_c",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_c",17,"curren","","character",3,"NO",NULL,NULL
+"t_gbody_c",18,"bookey","","character",2,"YES",NULL,NULL
+"t_gbody_c",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_gbody_c",20,"debcre","","character",1,"NO",NULL,NULL
+"t_gbody_c",21,"cscode","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_c",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_gbody_c",23,"pmethod","","character varying",20,"YES",NULL,NULL
+"t_gbody_c",24,"pblck","","character",1,"YES",NULL,NULL
+"t_gbody_c",25,"pterm","","character",4,"YES",NULL,NULL
+"t_gbody_c",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_gbody_c",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_c",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_gbody_c",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_gbody_c",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_gbody_c",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_gbody_c",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_gbody_c",33,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_c",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_gbody_c",35,"pctrcd","","character",5,"YES",NULL,NULL
+"t_gbody_c",36,"cctrcd","","character",5,"YES",NULL,NULL
+"t_gbody_c",37,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_gbody_o",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_o",2,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_gbody_o",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_gbody_o",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_gbody_o",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_o",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_gbody_o",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_gbody_o",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_gbody_o",9,"docty","","character",2,"NO",NULL,NULL
+"t_gbody_o",10,"invdt","","date",NULL,"NO",NULL,NULL
+"t_gbody_o",11,"posdt","","date",NULL,"NO",NULL,NULL
+"t_gbody_o",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_gbody_o",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_gbody_o",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_gbody_o",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_o",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_o",17,"curren","","character",3,"NO",NULL,NULL
+"t_gbody_o",18,"bookey","","character",2,"YES",NULL,NULL
+"t_gbody_o",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_gbody_o",20,"debcre","","character",1,"NO",NULL,NULL
+"t_gbody_o",21,"cscode","","character varying",10,"YES",NULL,NULL
+"t_gbody_o",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_gbody_o",23,"pmethod","","character varying",20,"YES",NULL,NULL
+"t_gbody_o",24,"pblck","","character",1,"YES",NULL,NULL
+"t_gbody_o",25,"pterm","","character",4,"YES",NULL,NULL
+"t_gbody_o",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_gbody_o",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_o",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_gbody_o",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_gbody_o",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_gbody_o",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_gbody_o",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_gbody_o",33,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_gbody_o",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_gbody_o",35,"pctrcd","","character varying",10,"YES",NULL,NULL
+"t_gbody_o",36,"cctrcd","","character varying",10,"YES",NULL,NULL
+"t_gbody_o",37,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_lbody",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_lbody",2,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_lbody",3,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_lbody",4,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_lbody",5,"cleardt","","date",NULL,"YES",NULL,NULL
+"t_lbody",6,"cleardoc","","character varying",10,"YES",NULL,NULL
+"t_lbody",7,"bookey","","character",2,"YES",NULL,NULL
+"t_lbody",8,"mulky","","character",1,"YES",NULL,NULL
+"t_lbody",9,"debcre","","character",1,"NO",NULL,NULL
+"t_lbody",10,"glmaster","","character varying",6,"NO",NULL,NULL
+"t_lbody",11,"autotax","","character",1,"YES",NULL,NULL
+"t_lbody",12,"gltype","","character",1,"YES",NULL,NULL
+"t_lbody",13,"bizcat","","character",4,"YES",NULL,NULL
+"t_lbody",14,"pctrcd","","character varying",10,"YES",NULL,NULL
+"t_lbody",15,"cctrcd","","character varying",10,"YES",NULL,NULL
+"t_lbody",16,"prjno","","character varying",30,"YES",NULL,NULL
+"t_lbody",17,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_lbody",18,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_lbody",19,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_lbody",20,"pmthd","","character",1,"YES",NULL,NULL
+"t_lbody",21,"pblck","","character",1,"YES",NULL,NULL
+"t_lbody",22,"pterm","","character",4,"YES",NULL,NULL
+"t_lbody",23,"basedt","","date",NULL,"YES",NULL,NULL
+"t_lbody",24,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_lbody",25,"duedt","","date",NULL,"YES",NULL,NULL
+"t_lbody",26,"pbank","","character varying",4,"YES",NULL,NULL
+"t_lbody",27,"manaky","","character varying",8,"YES",NULL,NULL
+"t_lbody",28,"macarea","","numeric",NULL,"YES",NULL,NULL
+"t_lbody",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_lbody",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_lbody",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_lbody",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_lbody",33,"assgn","","character varying",20,"YES",NULL,NULL
+"t_lbody",34,"lntext","","character varying",50,"YES",NULL,NULL
+"t_lhead",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_lhead",2,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_lhead",3,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_lhead",4,"docty","","character",2,"NO",NULL,NULL
+"t_lhead",5,"invdt","","date",NULL,"NO",NULL,NULL
+"t_lhead",6,"posdt","","date",NULL,"NO",NULL,NULL
+"t_lhead",7,"period","","numeric",NULL,"NO",NULL,NULL
+"t_lhead",8,"trandt","","date",NULL,"YES",NULL,NULL
+"t_lhead",9,"reftx","","character varying",20,"YES",NULL,NULL
+"t_lhead",10,"refdoc","","character varying",20,"YES",NULL,NULL
+"t_lhead",11,"infdoc","","character varying",20,"YES",NULL,NULL
+"t_lhead",12,"hdtxt","","character varying",30,"YES",NULL,NULL
+"t_lhead",13,"revdoc","","character varying",10,"YES",NULL,NULL
+"t_lhead",14,"revyr","","numeric",NULL,"YES",NULL,NULL
+"t_lhead",15,"curren","","character",3,"YES","'KRW'::bpchar",NULL
+"t_lhead",16,"exrate","","numeric",NULL,"YES","0",NULL
+"t_lhead",17,"dstat","","character",1,"YES","'P'::bpchar",NULL
+"t_lhead",18,"padate","","date",NULL,"YES",NULL,NULL
+"t_lhead",19,"nodate","","date",NULL,"YES",NULL,NULL
+"t_lhead",20,"txivno","","numeric",NULL,"YES",NULL,NULL
+"t_lhead",21,"txyear","","numeric",NULL,"YES",NULL,NULL
+"t_lhead",22,"entdt","","date",NULL,"YES","CURRENT_DATE",NULL
+"t_lhead",23,"enttm","","time without time zone",NULL,"YES","CURRENT_TIME",NULL
+"t_lhead",24,"usrnm","","character varying",10,"YES",NULL,NULL
+"t_mbkey",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_mbkey",2,"ana_type","PK","character varying",10,"NO",NULL,NULL
+"t_mbkey",3,"manaky","PK","character",8,"NO",NULL,NULL
+"t_mbkey",4,"mananm","","character varying",30,"NO",NULL,NULL
+"t_mbkey",5,"banaky","","character",8,"NO",NULL,NULL
+"t_nauth",1,"seq","PK","numeric",NULL,"NO",NULL,NULL
+"t_nauth",2,"btype","PK","character",5,"NO",NULL,NULL
+"t_nauth",3,"mtype","PK","character",8,"NO",NULL,NULL
+"t_nauth",4,"stype","","character varying",13,"NO",NULL,NULL
+"t_nauth",5,"name","","character varying",20,"NO",NULL,NULL
+"t_nbank",1,"bctry","PK","character",2,"NO",NULL,"ISO 국가코드 2자리"
+"t_nbank",2,"bankcd","PK","character varying",20,"NO",NULL,"은행 식별 코드"
+"t_nbank",3,"bnknm","","character varying",50,"NO",NULL,NULL
+"t_nbank",4,"swift","","character varying",20,"YES",NULL,NULL
+"t_nbank",5,"address","","character varying",150,"YES",NULL,NULL
+"t_nbank",6,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_nbank",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ndocnum",1,"doctype","PK","character",2,"NO",NULL,NULL
+"t_ndocnum",2,"doctext","","character varying",30,"NO",NULL,NULL
+"t_ndocnum",3,"frnum","","numeric",NULL,"NO",NULL,NULL
+"t_ndocnum",4,"tonum","","numeric",NULL,"NO",NULL,NULL
+"t_ndocnum",5,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_nexrate",1,"extype","PK","character",1,"NO",NULL,NULL
+"t_nexrate",2,"srccur","PK","character",3,"NO",NULL,NULL
+"t_nexrate",3,"tarcur","PK","character",3,"NO",NULL,NULL
+"t_nexrate",4,"date","PK","date",NULL,"NO",NULL,NULL
+"t_nexrate",5,"exrat","","numeric",NULL,"NO",NULL,NULL
+"t_nexrate",6,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_nglmst",1,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_nglmst",2,"glname1","","character varying",20,"NO",NULL,NULL
+"t_nglmst",3,"glname2","","character varying",50,"YES",NULL,NULL
+"t_nglmst",4,"indbspl","","character",1,"NO",NULL,NULL
+"t_nglmst",5,"currency","","character",3,"YES","'KRW'::bpchar",NULL
+"t_nglmst",6,"balyn","","character",1,"YES","'N'::bpchar",NULL
+"t_nglmst",7,"taxtype","","character",1,"YES",NULL,NULL
+"t_nglmst",8,"notxpt","","character",1,"YES","'X'::bpchar",NULL
+"t_nglmst",9,"eachitem","","character",1,"YES",NULL,NULL
+"t_nglmst",10,"gltype","","character",1,"YES",NULL,NULL
+"t_nglmst",11,"autopost","","character",1,"YES",NULL,NULL
+"t_nglmst",12,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ntxkey",1,"taxcd","PK","character varying",10,"NO",NULL,NULL
+"t_ntxkey",2,"taxnm","","character varying",50,"NO",NULL,NULL
+"t_ntxkey",3,"taxtyp","","character",1,"NO",NULL,NULL
+"t_ntxkey",4,"taxrate","","numeric",NULL,"YES","0",NULL
+"t_ntxkey",5,"currency","","character",3,"YES","'KRW'::bpchar",NULL
+"t_ntxkey",6,"glmaster","","character varying",6,"YES",NULL,NULL
+"t_ntxkey",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_ntxkey",8,"txgubun","","character varying",1,"YES",NULL,"과세구분 (1:과세, 2:영세, 3:면세, 4:매입불공제 등)"
+"t_package",1,"packcd","PK","character varying",10,"NO",NULL,NULL
+"t_package",2,"packnm","","character varying",50,"NO",NULL,NULL
+"t_package",3,"max_user","","integer",NULL,"YES","5",NULL
+"t_package",4,"price","","numeric",NULL,"YES","0",NULL
+"t_package",5,"use_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_package",6,"descr","","text",NULL,"YES",NULL,NULL
+"t_package",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_post_map",1,"docty","PK","character",2,"NO",NULL,NULL
+"t_post_map",2,"target_table","PK","character varying",30,"NO",NULL,NULL
+"t_post_map",3,"required_yn","","character",1,"YES","'Y'::bpchar",NULL
+"t_post_map",4,"seq","","numeric",NULL,"NO",NULL,NULL
+"t_post_map",5,"description","","character varying",100,"YES",NULL,NULL
+"t_post_map",6,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_sbody_c",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_c",2,"suppcd","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_c",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_sbody_c",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_sbody_c",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_c",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_sbody_c",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_c",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_sbody_c",9,"docty","","character",2,"NO",NULL,NULL
+"t_sbody_c",10,"invdt","","date",NULL,"NO",NULL,NULL
+"t_sbody_c",11,"posdt","","date",NULL,"NO",NULL,NULL
+"t_sbody_c",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_sbody_c",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_sbody_c",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_sbody_c",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_c",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_c",17,"curren","","character",3,"NO",NULL,NULL
+"t_sbody_c",18,"bookey","","character",2,"YES",NULL,NULL
+"t_sbody_c",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_sbody_c",20,"debcre","","character",1,"NO",NULL,NULL
+"t_sbody_c",21,"glmaster","","character varying",6,"NO",NULL,NULL
+"t_sbody_c",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_sbody_c",23,"pmethod","","character",1,"YES",NULL,NULL
+"t_sbody_c",24,"pblck","","character",1,"YES",NULL,NULL
+"t_sbody_c",25,"pterm","","character",4,"YES",NULL,NULL
+"t_sbody_c",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_sbody_c",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_c",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_sbody_c",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_sbody_c",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_sbody_c",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_sbody_c",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_sbody_c",33,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_c",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_sbody_c",35,"pctrcd","","character",5,"YES",NULL,NULL
+"t_sbody_c",36,"cctrcd","","character",5,"YES",NULL,NULL
+"t_sbody_c",37,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_sbody_o",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_o",2,"suppcd","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_o",3,"mulky","PK","character",1,"NO",NULL,NULL
+"t_sbody_o",4,"clrdt","PK","date",NULL,"NO",NULL,NULL
+"t_sbody_o",5,"clrdoc","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_o",6,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_sbody_o",7,"docno","PK","character varying",10,"NO",NULL,NULL
+"t_sbody_o",8,"lineno","PK","numeric",NULL,"NO",NULL,NULL
+"t_sbody_o",9,"docty","","character",2,"NO",NULL,NULL
+"t_sbody_o",10,"invdt","","date",NULL,"NO",NULL,NULL
+"t_sbody_o",11,"posdt","","date",NULL,"NO",NULL,NULL
+"t_sbody_o",12,"nodate","","date",NULL,"YES",NULL,NULL
+"t_sbody_o",13,"reftx","","character varying",20,"YES",NULL,NULL
+"t_sbody_o",14,"pclrdoc","","character varying",10,"YES",NULL,NULL
+"t_sbody_o",15,"pclryr","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_o",16,"pclrlin","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_o",17,"curren","","character",3,"NO",NULL,NULL
+"t_sbody_o",18,"bookey","","character",2,"YES",NULL,NULL
+"t_sbody_o",19,"prjno","","character varying",30,"YES",NULL,NULL
+"t_sbody_o",20,"debcre","","character",1,"NO",NULL,NULL
+"t_sbody_o",21,"glmaster","","character varying",6,"NO",NULL,NULL
+"t_sbody_o",22,"taxcd","","character varying",10,"YES",NULL,NULL
+"t_sbody_o",23,"pmethod","","character varying",20,"YES",NULL,NULL
+"t_sbody_o",24,"pblck","","character",1,"YES",NULL,NULL
+"t_sbody_o",25,"pterm","","character",4,"YES",NULL,NULL
+"t_sbody_o",26,"basedt","","date",NULL,"YES",NULL,NULL
+"t_sbody_o",27,"dueday","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_o",28,"duedt","","date",NULL,"YES",NULL,NULL
+"t_sbody_o",29,"bizamt","","numeric",NULL,"YES","0",NULL
+"t_sbody_o",30,"locamt","","numeric",NULL,"YES","0",NULL
+"t_sbody_o",31,"biztax","","numeric",NULL,"YES","0",NULL
+"t_sbody_o",32,"loctax","","numeric",NULL,"YES","0",NULL
+"t_sbody_o",33,"pbank","","numeric",NULL,"YES",NULL,NULL
+"t_sbody_o",34,"bizcat","","character",4,"YES",NULL,NULL
+"t_sbody_o",35,"pctrcd","","character varying",10,"YES",NULL,NULL
+"t_sbody_o",36,"cctrcd","","character varying",10,"YES",NULL,NULL
+"t_sbody_o",37,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_totlg",1,"fisyr","PK","numeric",NULL,"NO",NULL,NULL
+"t_totlg",2,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_totlg",3,"debcre","PK","character",1,"NO",NULL,NULL
+"t_totlg",4,"glmaster","PK","character varying",6,"NO",NULL,NULL
+"t_totlg",5,"bizcat","PK","character",4,"NO",NULL,NULL
+"t_totlg",6,"pctrcd","PK","character varying",10,"NO",NULL,NULL
+"t_totlg",7,"cctrcd","PK","character varying",10,"NO",NULL,NULL
+"t_totlg",8,"prjno","PK","character varying",30,"NO",NULL,NULL
+"t_totlg",9,"macarea","PK","numeric",NULL,"NO",NULL,NULL
+"t_totlg",10,"manaky","PK","character varying",8,"NO",NULL,"중분류키"
+"t_totlg",11,"curren","PK","character",3,"NO",NULL,NULL
+"t_totlg",12,"ledger","PK","character",2,"NO",NULL,NULL
+"t_totlg",13,"trscr","","numeric",NULL,"YES","0",NULL
+"t_totlg",14,"trs01","","numeric",NULL,"YES","0",NULL
+"t_totlg",15,"trs02","","numeric",NULL,"YES","0",NULL
+"t_totlg",16,"trs03","","numeric",NULL,"YES","0",NULL
+"t_totlg",17,"trs04","","numeric",NULL,"YES","0",NULL
+"t_totlg",18,"trs05","","numeric",NULL,"YES","0",NULL
+"t_totlg",19,"trs06","","numeric",NULL,"YES","0",NULL
+"t_totlg",20,"trs07","","numeric",NULL,"YES","0",NULL
+"t_totlg",21,"trs08","","numeric",NULL,"YES","0",NULL
+"t_totlg",22,"trs09","","numeric",NULL,"YES","0",NULL
+"t_totlg",23,"trs10","","numeric",NULL,"YES","0",NULL
+"t_totlg",24,"trs11","","numeric",NULL,"YES","0",NULL
+"t_totlg",25,"trs12","","numeric",NULL,"YES","0",NULL
+"t_totlg",26,"trs13","","numeric",NULL,"YES","0",NULL
+"t_totlg",27,"trs14","","numeric",NULL,"YES","0",NULL
+"t_totlg",28,"trs15","","numeric",NULL,"YES","0",NULL
+"t_totlg",29,"loccr","","numeric",NULL,"YES","0",NULL
+"t_totlg",30,"loc01","","numeric",NULL,"YES","0",NULL
+"t_totlg",31,"loc02","","numeric",NULL,"YES","0",NULL
+"t_totlg",32,"loc03","","numeric",NULL,"YES","0",NULL
+"t_totlg",33,"loc04","","numeric",NULL,"YES","0",NULL
+"t_totlg",34,"loc05","","numeric",NULL,"YES","0",NULL
+"t_totlg",35,"loc06","","numeric",NULL,"YES","0",NULL
+"t_totlg",36,"loc07","","numeric",NULL,"YES","0",NULL
+"t_totlg",37,"loc08","","numeric",NULL,"YES","0",NULL
+"t_totlg",38,"loc09","","numeric",NULL,"YES","0",NULL
+"t_totlg",39,"loc10","","numeric",NULL,"YES","0",NULL
+"t_totlg",40,"loc11","","numeric",NULL,"YES","0",NULL
+"t_totlg",41,"loc12","","numeric",NULL,"YES","0",NULL
+"t_totlg",42,"loc13","","numeric",NULL,"YES","0",NULL
+"t_totlg",43,"loc14","","numeric",NULL,"YES","0",NULL
+"t_totlg",44,"loc15","","numeric",NULL,"YES","0",NULL
+"t_totlg",45,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_v_pattern_stats",1,"comcd","PK","character varying",10,"NO",NULL,NULL
+"t_v_pattern_stats",2,"pattern_id","PK","integer",NULL,"NO",NULL,NULL
+"t_v_pattern_stats",3,"usage_count","","integer",NULL,"YES","0",NULL
+"t_v_pattern_stats",4,"last_used_at","","timestamp with time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_v_std_pattern",1,"id","PK","integer",NULL,"NO","nextval('t_v_std_pattern_id_seq'::regclass)",NULL
+"t_v_std_pattern",2,"pattern_nm","","character varying",50,"YES",NULL,NULL
+"t_v_std_pattern",3,"example_tx","","text",NULL,"YES",NULL,NULL
+"t_v_std_pattern",4,"embedding","","USER-DEFINED",NULL,"YES",NULL,NULL
+"t_v_std_pattern",5,"docty","","character",2,"YES",NULL,NULL
+"t_v_std_pattern",6,"journal_json","","jsonb",NULL,"YES",NULL,NULL
+"t_v_std_pattern",7,"reg_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL
+"t_v_user_learn",1,"id","PK","integer",NULL,"NO","nextval('t_v_user_learn_id_seq'::regclass)",NULL
+"t_v_user_learn",2,"comcd","","character varying",10,"YES",NULL,NULL
+"t_v_user_learn",3,"usrnm","","character varying",10,"YES",NULL,NULL
+"t_v_user_learn",4,"input_tx","","text",NULL,"YES",NULL,NULL
+"t_v_user_learn",5,"embedding","","USER-DEFINED",NULL,"YES",NULL,NULL
+"t_v_user_learn",6,"final_json","","jsonb",NULL,"YES",NULL,NULL
+"t_v_user_learn",7,"hit_count","","integer",NULL,"YES","1",NULL
+"t_v_user_learn",8,"upd_date","","timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP",NULL

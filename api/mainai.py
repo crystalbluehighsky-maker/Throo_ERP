@@ -197,30 +197,61 @@ async def create_journal_entry(req: JournalPostRequest, db: Session = Depends(ge
             base_locamt = _q(base_bizamt * _exrate)
 
             for idx, line in enumerate(req.lines):
+                # ── gltype 기반 bookey / mulky 동적 결정 ───────────────────────
+                # C(AR): 고객 오픈아이템 → C1 / S(AP): 공급처 오픈아이템 → S1
+                # 그 외(비용·현금·세금 등 GA 계정): bookey=GA, mulky 공백 고정
+                #
+                # mulky='A' 필터링: 헤더에 mulky='A'가 있어도 선수금(215000)·선급금(120000)
+                # 라인에만 'A'를 전파한다. 같은 전표의 외상매입금(210000) 등 일반 AP/AR 계정은
+                # 헤더 플래그와 무관하게 공백으로 처리 → 오픈아이템 오염 방지.
+                _ADVANCE_GL_CODES = {"120000", "215000"}   # mulky='A' 전파 허용 계정
+                _glmaster_str     = str(line.glmaster or "").strip()
+                _gltype           = (line.gltype or "").strip()
+
+                def _resolve_mulky(base_mulky: str) -> str:
+                    """mulky='A'는 선수금/선급금 계정에만 허용, 나머지는 공백 반환."""
+                    if base_mulky == "A":
+                        return "A" if _glmaster_str in _ADVANCE_GL_CODES else " "
+                    return base_mulky   # 'A' 외의 값( ' ' 포함)은 그대로 사용
+
+                if _gltype == "C":
+                    _line_bookey = "C1"
+                    _line_mulky  = _resolve_mulky(_mulky)
+                elif _gltype == "S":
+                    _line_bookey = "S1"
+                    _line_mulky  = _resolve_mulky(_mulky)
+                else:
+                    _line_bookey = "GA"
+                    _line_mulky  = " "         # GA 라인은 mulky 항상 공백
+
                 p = {
-                    "c": comcd, "f": fisyr, "s": slipno, "l": idx+1, "b": str(req.bizptcd).strip()[:10], 
-                    "docty": req.doctyp[:2], "posdt": req.pstdate, "invdt": req.docdate, "curren": req.currency[:3], 
-                    "locamt": _q(Decimal(str(line.bizamt)) * _exrate), "loctax": _q(Decimal(str(line.biztax or 0)) * _exrate), 
-                    "bizamt": line.bizamt, "biztax": line.biztax, "taxcd": req.taxcode[:10] if req.taxcode else "", 
-                    "manaky": str(line.anakey).strip()[:8], "pctrcd": str(line.pctrcd).strip()[:10], 
-                    "glmaster": str(line.glmaster).strip()[:10], 
-                    "mulky": _mulky,
-                    "debcre": line.debcre, "duedt": line.duedt or '1900-01-01', 
-                    "bookey": ("C1" if req.doctyp=="CI" else "S1" if req.doctyp=="SI" else "GA"), 
-                    "base_bizamt": base_bizamt, "base_locamt": base_locamt
+                    "c": comcd, "f": fisyr, "s": slipno, "l": idx+1,
+                    "b": str(req.bizptcd).strip()[:10],
+                    "docty": req.doctyp[:2], "posdt": req.pstdate, "invdt": req.docdate,
+                    "curren": req.currency[:3],
+                    "locamt": _q(Decimal(str(line.bizamt)) * _exrate),
+                    "loctax": _q(Decimal(str(line.biztax or 0)) * _exrate),
+                    "bizamt": line.bizamt, "biztax": line.biztax,
+                    "taxcd": req.taxcode[:10] if req.taxcode else "",
+                    "manaky": str(line.anakey).strip()[:8],
+                    "pctrcd": str(line.pctrcd).strip()[:10],
+                    "glmaster": str(line.glmaster).strip()[:10],
+                    "mulky":  _line_mulky,
+                    "debcre": line.debcre,
+                    "duedt":  line.duedt or '1900-01-01',
+                    "bookey": _line_bookey,
+                    "base_bizamt": base_bizamt, "base_locamt": base_locamt,
                 }
-                
+
                 # 3. 상세 저장 (t_lbody)
                 db.execute(text("INSERT INTO t_lbody (comcd, fisyr, docno, lineno, debcre, glmaster, bizamt, locamt, mulky, bookey, pctrcd, manaky, duedt) VALUES (:c, :f, :s, :l, :debcre, :glmaster, :bizamt, :locamt, :mulky, :bookey, :pctrcd, :manaky, :duedt)"), p)
-                
-                # 4. 🌟 [확인] 일반원장 보조부 저장 (t_gbody_o)
+
+                # 4. 일반원장 보조부 저장 (t_gbody_o) — 전 라인 공통
                 db.execute(text("INSERT INTO t_gbody_o (comcd, glmaster, cscode, mulky, clrdt, clrdoc, fisyr, docno, lineno, docty, invdt, posdt, curren, bookey, debcre, pctrcd, bizamt, locamt, biztax, loctax, taxcd) VALUES (:c, :glmaster, :b, :mulky, '1900-01-01', '', :f, :s, :l, :docty, :invdt, :posdt, :curren, :bookey, :debcre, :pctrcd, :bizamt, :locamt, :biztax, :loctax, :taxcd)"), p)
-                
-                # 5. 거래처 보조부 저장 — gltype 마스터값 기준 필터링
-                # 'C'(AR 고객 오픈아이템) → t_cbody_o 1줄
-                # 'S'(AP 공급업체 오픈아이템) → t_sbody_o 1줄
-                # 그 외(비용·세금·자산 등) → 건너뜀
-                _gltype = (line.gltype or "").strip()
+
+                # 5. 거래처 보조원장 분리 저장
+                # gltype='C' → t_cbody_o(AR 고객) / 'S' → t_sbody_o(AP 공급처)
+                # GA 계정(현금·비용·세금 등)은 보조원장 저장 대상 아님
                 if _gltype == 'C':
                     db.execute(text("INSERT INTO t_cbody_o (comcd, fisyr, docno, lineno, custcd, glmaster, mulky, clrdt, clrdoc, docty, invdt, posdt, curren, bookey, debcre, duedt, bizamt, locamt, taxcd) VALUES (:c, :f, :s, :l, :b, :glmaster, :mulky, '1900-01-01', '', :docty, :invdt, :posdt, :curren, :bookey, :debcre, :duedt, :bizamt, :locamt, :taxcd)"), p)
                 elif _gltype == 'S':
@@ -449,3 +480,49 @@ async def master_search(search_type: str, q: str = "", db: Session = Depends(get
         return []
     rows = db.execute(text(query), {"c": comcd, "q": qf}).fetchall()
     return [{"code": r[0], "name": r[1], "type": r[2]} for r in rows]
+
+@router.get("/api/exrate")
+async def get_exrate(
+    srccur: str,
+    tarcur: str,
+    target_date: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """환율 As-of 조회: 지정 날짜 이전 가장 최근 환율을 t_nexrate에서 반환.
+    srccur=USD&tarcur=KRW&target_date=2026-03-24
+    동일 통화면 exrate=1을 즉시 반환.
+    """
+    srccur     = srccur.strip().upper()
+    tarcur     = tarcur.strip().upper()
+
+    if srccur == tarcur:
+        return {"exrate": 1.0, "found": True, "msg": "동일 통화 — 환율 1 고정"}
+
+    try:
+        row = db.execute(text("""
+            SELECT exrat
+            FROM   t_nexrate
+            WHERE  extype  = 'S'
+              AND  srccur  = :srccur
+              AND  tarcur  = :tarcur
+              AND  date   <= :target_date
+            ORDER  BY date DESC
+            LIMIT  1
+        """), {
+            "srccur":      srccur,
+            "tarcur":      tarcur,
+            "target_date": target_date,
+        }).fetchone()
+
+        if row:
+            return {"exrate": float(row[0]), "found": True}
+        else:
+            return {
+                "exrate": 1.0,
+                "found":  False,
+                "msg":    f"{srccur}/{tarcur} 환율 데이터 없음 (날짜: {target_date})",
+            }
+    except Exception as e:
+        logger.error(f"[환율조회 API 오류] srccur={srccur} tarcur={tarcur} date={target_date} | {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -2,7 +2,7 @@
 CREATE TABLE t_ntxkey (
     taxcd       VARCHAR(10)   NOT NULL, -- 세금 코드 (PK, 예: V1, V0)
     taxnm       VARCHAR(50)   NOT NULL, -- 세금 코드명 (예: 매입과세 10%)
-    taxtyp      CHAR(1)       NOT NULL, -- 세금 구분 (I: 매입/Input, O: 매출/Output)
+    taxtyp      CHAR(1)       NOT NULL, -- 세금 구분 (S: 매출관련, P:매입관련,D 매입불공제)
     taxrate     NUMERIC(5, 2) DEFAULT 0, -- 세율 (예: 10.00)
     
     -- 전역 규칙: 통화키 적용
